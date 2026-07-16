@@ -1,7 +1,6 @@
 import _ from "lodash"
 import { createApp } from "vue"
-import { EstimateDirection, nodePropTypes, PropType } from "@/enums"
-import type { JIT } from "@/interfaces"
+import { EstimateDirection, NodeProp } from "@/enums"
 import SortGroup from "@/components/SortGroup.vue"
 import JitDetails from "@/components/JitDetails.vue"
 import hljs from "highlight.js/lib/core"
@@ -11,9 +10,18 @@ hljs.registerLanguage("pgsql", pgsql)
 import json from "highlight.js/lib/languages/json"
 hljs.registerLanguage("json", json)
 
-export function duration(value: number | undefined): string {
+export function formatDuration(value: unknown): string {
   if (value === undefined) {
-    return "N/A"
+    return "-"
+  }
+  if (typeof value !== "number") {
+    throw new Error(`Expected number, got ${typeof value}`);
+  }
+  if (value < 0) {
+    console.error(`
+      Duration is negative. This is probably a bug.
+      Please report it at https://github.com/dalibo/pev2.
+    `)
   }
   const result: string[] = []
   let denominator: number = 1000 * 60 * 60 * 24
@@ -41,7 +49,13 @@ export function duration(value: number | undefined): string {
   }
   remainder = remainder % denominator
   const milliseconds = parseFloat(remainder.toPrecision(3))
-  result.push(milliseconds.toLocaleString() + "ms")
+  if (milliseconds) {
+    result.push(milliseconds.toLocaleString() + "ms")
+  }
+
+  if (result.length === 0) {
+    return "0ms"
+  }
 
   return result.slice(0, 2).join(" ")
 }
@@ -61,32 +75,251 @@ export function formatMemoryUsage(memoryInKB: number): string {
   return `${value.toFixed(2)} ${units[unitIndex]}`
 }
 
-export function cost(value: number): string {
+export function formatCost(value: unknown): string {
   if (value === undefined) {
     return "N/A"
   }
-  value = parseFloat(value.toPrecision(3))
-  return value.toLocaleString()
+  return (value as number).toLocaleString(undefined, { minimumFractionDigits: 2 })
 }
 
-export function rows(value: number): string {
+export function formatRows(value: unknown): string {
   if (value === undefined) {
     return "N/A"
   }
-  return value.toLocaleString()
+  return (value as number).toLocaleString()
 }
 
-export function loops(value: number): string {
+export function formatLoops(value: unknown): string {
   if (value === undefined) {
     return "N/A"
   }
-  return value.toLocaleString()
+  return (value as number).toLocaleString()
 }
 
-export function factor(value: number): string {
-  const f: string = parseFloat(value.toPrecision(2)).toLocaleString()
-  const compiled = _.template("${f}&nbsp;&times;")
-  return compiled({ f })
+export function formatFactor(value: unknown): string {
+  if (value === undefined) {
+    return "N/A"
+  }
+  const f: string = parseFloat((value as number).toPrecision(2)).toLocaleString()
+  return `${f}&nbsp;&times;`
+}
+
+export function formatKilobytes(value: unknown): string {
+  return formatBytes_((value as number) * 1024)
+}
+
+function formatBytes(value: unknown): string {
+  return formatBytes_(value as number)
+}
+
+export function formatBytes_(value: number) {
+  if (value === 0) {
+    return "0 kB"
+  }
+  const k = 1024
+  const units = ["B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+  const i = Math.floor(Math.log(value) / Math.log(k))
+  const raw = value / Math.pow(k, i)
+  const valueString = raw % 1 === 0
+    ? raw.toLocaleString()
+    : parseFloat(raw.toPrecision(2)).toLocaleString()
+  return `${valueString} ${units[i]}`
+}
+
+export function formatBlocksAsBytes(value: number): string {
+  return value ? formatBytes_(value * 8 * 1024) : ""
+}
+
+export function formatBlocks(value: unknown, asHtml = false): string {
+  asHtml = !!asHtml
+  if (!value) {
+    return ""
+  }
+  let r = value.toLocaleString()
+  if (asHtml) {
+    r += `<br><small>${formatBlocksAsBytes(value as number)}</small>`
+  }
+  return r
+}
+
+export function formatBlocksHtml(value: unknown): string {
+  return formatBlocks(value, true)
+}
+
+export function formatPercent(value: number): string {
+  if (isNaN(value)) {
+    return "-"
+  }
+  return _.round(value * 100) + "%"
+}
+
+export function formatList(value: unknown): string {
+  if (value == undefined) {
+    return ''
+  }
+  const lines =
+    typeof value === "string"
+    ? value.split(/\s*,\s*/)
+    : value
+
+  if (!Array.isArray(lines)) {
+    throw new Error(`Expected string or array of strings, got ${typeof value}`);
+  }
+
+  const items = lines.map(line => `<li>${_.escape(line)}</li>`).join("")
+
+  return `<ul class="list-unstyled mb-0">${items}</ul>`
+}
+
+function formatSortGroups(value: unknown): string {
+  const app = createApp(SortGroup, { sortGroup: value }).mount(
+    document.createElement("div"),
+  )
+  return app.$el.outerHTML
+}
+
+export function formatTransferRate(value: unknown): string {
+  if (!value) {
+    return ""
+  }
+  return formatBlocksAsBytes(value as number) + "/s"
+}
+
+function formatJit(value: unknown): string {
+  const app = createApp(JitDetails, { jit: value }).mount(
+    document.createElement("div"),
+  )
+  return app.$el.outerHTML
+}
+
+function formatBoolean(value: unknown): string {
+  return (value as boolean) ? "yes" : "no"
+}
+
+function formatJson(value: unknown): string {
+  return JSON.stringify(value, null, 2)
+}
+
+function formatEstimateDirection(value: unknown): string {
+  switch (value) {
+    case EstimateDirection.over:
+      return '<i class="fa fa-arrow-up"></i> over'
+    case EstimateDirection.under:
+      return '<i class="fa fa-arrow-down"></i> under'
+    default:
+      return "-"
+  }
+}
+
+type Formatter = (value: unknown) => string;
+
+const nodePropFormatters: Partial<Record<NodeProp, Formatter>> = {
+  [NodeProp.ACTUAL_ROWS]: formatRows,
+  [NodeProp.ACTUAL_LOOPS]: formatLoops,
+  [NodeProp.PLAN_ROWS]: formatRows,
+  [NodeProp.PLAN_WIDTH]: formatBytes,
+  [NodeProp.ACTUAL_ROWS_REVISED]: formatRows,
+  [NodeProp.ACTUAL_ROWS_FRACTIONAL]: formatBoolean,
+  [NodeProp.PLAN_ROWS_REVISED]: formatRows,
+  [NodeProp.ACTUAL_TOTAL_TIME]: formatDuration,
+  [NodeProp.ACTUAL_STARTUP_TIME]: formatDuration,
+  [NodeProp.STARTUP_COST]: formatCost,
+  [NodeProp.TOTAL_COST]: formatCost,
+  [NodeProp.PARALLEL_AWARE]: formatBoolean,
+  [NodeProp.WORKERS]: formatJson,
+  [NodeProp.SORT_SPACE_USED]: formatKilobytes,
+  [NodeProp.ROWS_REMOVED_BY_FILTER]: formatRows,
+  [NodeProp.ROWS_REMOVED_BY_JOIN_FILTER]: formatRows,
+  [NodeProp.ROWS_REMOVED_BY_FILTER_REVISED]: formatRows,
+  [NodeProp.ROWS_REMOVED_BY_JOIN_FILTER_REVISED]: formatRows,
+  [NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK]: formatRows,
+  [NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK_REVISED]: formatRows,
+  [NodeProp.HEAP_FETCHES]: formatRows,
+  [NodeProp.OUTPUT]: formatList,
+  [NodeProp.SORT_KEY]: formatList,
+  [NodeProp.PRESORTED_KEY]: formatList,
+  [NodeProp.WAL_RECORDS]: formatRows,
+  [NodeProp.WAL_BYTES]: formatBytes,
+  [NodeProp.WAL_FPI]: formatRows,
+
+  [NodeProp.EXCLUSIVE_DURATION]: formatDuration,
+  [NodeProp.EXCLUSIVE_COST]: formatCost,
+
+  [NodeProp.PLANNER_ESTIMATE_FACTOR]: formatFactor,
+  [NodeProp.PLANNER_ESTIMATE_DIRECTION]: formatEstimateDirection,
+
+  [NodeProp.IO_READ_TIME]: formatDuration,
+  [NodeProp.IO_WRITE_TIME]: formatDuration,
+  [NodeProp.SUM_IO_READ_TIME]: formatDuration,
+  [NodeProp.SUM_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.AVERAGE_SUM_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.AVERAGE_SUM_IO_WRITE_SPEED]: formatTransferRate,
+
+  [NodeProp.AVERAGE_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.AVERAGE_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.SHARED_IO_READ_TIME]: formatDuration,
+  [NodeProp.SHARED_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.AVERAGE_SHARED_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.AVERAGE_SHARED_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.LOCAL_IO_READ_TIME]: formatDuration,
+  [NodeProp.LOCAL_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.AVERAGE_LOCAL_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.AVERAGE_LOCAL_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.TEMP_IO_READ_TIME]: formatDuration,
+  [NodeProp.TEMP_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.AVERAGE_TEMP_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.AVERAGE_TEMP_IO_WRITE_SPEED]: formatTransferRate,
+
+  [NodeProp.EXCLUSIVE_IO_READ_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_AVERAGE_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_AVERAGE_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_SHARED_IO_READ_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_SHARED_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_LOCAL_IO_READ_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_LOCAL_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_WRITE_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_TEMP_IO_READ_TIME]: formatDuration,
+
+  [NodeProp.EXCLUSIVE_TEMP_IO_WRITE_TIME]: formatDuration,
+  [NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_READ_SPEED]: formatTransferRate,
+  [NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_WRITE_SPEED]: formatTransferRate,
+
+  [NodeProp.SHARED_HIT_BLOCKS]: formatBlocksHtml,
+  [NodeProp.SHARED_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.SHARED_DIRTIED_BLOCKS]: formatBlocksHtml,
+  [NodeProp.SHARED_WRITTEN_BLOCKS]: formatBlocksHtml,
+  [NodeProp.TEMP_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.TEMP_WRITTEN_BLOCKS]: formatBlocksHtml,
+  [NodeProp.LOCAL_HIT_BLOCKS]: formatBlocksHtml,
+  [NodeProp.LOCAL_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.LOCAL_DIRTIED_BLOCKS]: formatBlocksHtml,
+  [NodeProp.LOCAL_WRITTEN_BLOCKS]: formatBlocksHtml,
+
+  [NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS]: formatBlocksHtml,
+  [NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS]: formatBlocksHtml,
+
+  [NodeProp.FULL_SORT_GROUPS]: formatSortGroups,
+  [NodeProp.PRE_SORTED_GROUPS]: formatSortGroups,
+
+  [NodeProp.JIT]: formatJit,
+}
+
+export function formatNodeProp(key: string, value: unknown): string {
+  const formatter = nodePropFormatters[key as NodeProp];
+  if (formatter) return formatter(value);
+  return _.escape(value as unknown as string)
 }
 
 export function keysToString(value: string[] | string): string {
@@ -99,14 +332,14 @@ export function keysToString(value: string[] | string): string {
 
 export function sortKeys(
   sort: string[],
-  presort: string[] | undefined
+  presort: string[] | undefined,
 ): string {
   return _.map(sort, (v) => {
     let result = _.escape(v)
     if (presort) {
       result +=
         presort.indexOf(v) !== -1
-          ? '&nbsp;<span class="text-secondary">(presort)</span>'
+          ? '&nbsp;<span class="text-body-tertiary">(presort)</span>'
           : ""
     }
     return result
@@ -116,126 +349,6 @@ export function sortKeys(
 export function truncate(text: string, length: number, clamp: string): string {
   clamp = clamp || "..."
   return text.length > length ? text.slice(0, length) + clamp : text
-}
-
-export function kilobytes(value: number): string {
-  return formatBytes(value * 1024)
-}
-
-export function bytes(value: number): string {
-  return formatBytes(value)
-}
-
-export function formatBytes(value: number, precision = 2) {
-  const k = 1024
-  const dm = precision < 0 ? 0 : precision
-  const units = ["Bytes", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
-  const i = Math.floor(Math.log(value) / Math.log(k))
-  const compiled = _.template("${value} ${unit}")
-  const valueString = parseFloat(
-    (value / Math.pow(k, i)).toPrecision(dm)
-  ).toLocaleString()
-  return compiled({ value: valueString, unit: units[i] })
-}
-
-export function blocksAsBytes(value: number): string {
-  return value ? formatBytes(value * 8 * 1024) : ""
-}
-
-export function blocks(value: number, asHtml = false): string {
-  asHtml = !!asHtml
-  if (!value) {
-    return ""
-  }
-  let r = value.toLocaleString()
-  if (asHtml) {
-    r += `<br><small>${blocksAsBytes(value)}</small>`
-  }
-  return r
-}
-
-export function percent(value: number): string {
-  if (isNaN(value)) {
-    return "-"
-  }
-  return _.round(value * 100) + "%"
-}
-
-export function list(value: string[] | string): string {
-  if (typeof value === "string") {
-    value = value.split(/\s*,\s*/)
-  }
-  const compiled = _.template(
-    "<% _.forEach(lines, function(line) { %><li><%= line %></li><% }); %>"
-  )
-  return (
-    '<ul class="list-unstyled mb-0">' + compiled({ lines: value }) + "</ul>"
-  )
-}
-
-function sortGroups(value: string): string {
-  const app = createApp(SortGroup, { sortGroup: value }).mount(
-    document.createElement("div")
-  )
-  return app.$el.outerHTML
-}
-
-export function transferRate(value: number): string {
-  if (!value) {
-    return ""
-  }
-  return formatBytes(value * 8 * 1024) + "/s"
-}
-
-function jit(value: JIT): string {
-  const app = createApp(JitDetails, { jit: value }).mount(
-    document.createElement("div")
-  )
-  return app.$el.outerHTML
-}
-
-export function formatNodeProp(key: string, value: unknown): string {
-  if (_.has(nodePropTypes, key)) {
-    if (nodePropTypes[key] === PropType.duration) {
-      return duration(value as number)
-    } else if (nodePropTypes[key] === PropType.boolean) {
-      return value ? "yes" : "no"
-    } else if (nodePropTypes[key] === PropType.cost) {
-      return cost(value as number)
-    } else if (nodePropTypes[key] === PropType.rows) {
-      return rows(value as number)
-    } else if (nodePropTypes[key] === PropType.loops) {
-      return loops(value as number)
-    } else if (nodePropTypes[key] === PropType.factor) {
-      return factor(value as number)
-    } else if (nodePropTypes[key] === PropType.estimateDirection) {
-      switch (value) {
-        case EstimateDirection.over:
-          return '<i class="fa fa-arrow-up"></i> over'
-        case EstimateDirection.under:
-          return '<i class="fa fa-arrow-down"></i> under'
-        default:
-          return "-"
-      }
-    } else if (nodePropTypes[key] === PropType.json) {
-      return JSON.stringify(value, null, 2)
-    } else if (nodePropTypes[key] === PropType.bytes) {
-      return bytes(value as number)
-    } else if (nodePropTypes[key] === PropType.kilobytes) {
-      return kilobytes(value as number)
-    } else if (nodePropTypes[key] === PropType.blocks) {
-      return blocks(value as number, true)
-    } else if (nodePropTypes[key] === PropType.list) {
-      return list(value as string[])
-    } else if (nodePropTypes[key] === PropType.sortGroups) {
-      return sortGroups(value as string)
-    } else if (nodePropTypes[key] === PropType.transferRate) {
-      return transferRate(value as number)
-    } else if (nodePropTypes[key] === PropType.jit) {
-      return jit(value as JIT)
-    }
-  }
-  return _.escape(value as unknown as string)
 }
 
 export function durationClass(i: number): string {

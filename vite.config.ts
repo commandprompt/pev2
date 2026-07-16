@@ -4,13 +4,14 @@ import { fileURLToPath, URL } from "url"
 import { defineConfig } from "vite"
 import vue from "@vitejs/plugin-vue"
 import { viteSingleFile } from "vite-plugin-singlefile"
+import dts from "vite-plugin-dts"
 
 const build = process.env.LIB
   ? {
       lib: {
         entry: path.resolve(__dirname, "src/components/index.ts"),
         name: "pev2",
-        fileName: (format) => `pev2.${format}.js`,
+        fileName: (format: string) => `pev2.${format}.js`,
       },
       rollupOptions: {
         external: ["vue"],
@@ -48,7 +49,7 @@ export default defineConfig({
         },
       },
     }),
-    viteSingleFile(),
+    process.env.LIB ? dts() : viteSingleFile()
   ],
   resolve: {
     alias: {

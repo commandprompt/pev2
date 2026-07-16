@@ -1,38 +1,20 @@
 <script lang="ts" setup>
 import _ from "lodash"
-import { computed, inject, onBeforeMount, ref } from "vue"
-import type { Ref } from "vue"
-import type { IPlan, Node, StatsTableItemType } from "@/interfaces"
-import { PlanKey } from "@/symbols"
+import { computed } from "vue"
+import type { Node, StatsTableItemType } from "@/interfaces"
 import { NodeProp, SortDirection } from "@/enums"
 import SortedTable from "@/components/SortedTable.vue"
 import SortLink from "@/components/SortLink.vue"
 import StatsTableItem from "@/components/StatsTableItem.vue"
+import { store } from "@/store"
 
-const nodes: Node[] = []
-const executionTime = ref<number>(0)
+const executionTime = computed(
+  () =>
+    store.stats.executionTime ||
+    (store.plan?.content.Plan?.[NodeProp.ACTUAL_TOTAL_TIME] as number),
+)
 
-const plan = inject(PlanKey) as Ref<IPlan>
-
-onBeforeMount(() => {
-  executionTime.value =
-    plan.value.planStats.executionTime ||
-    (plan.value.content.Plan?.[NodeProp.ACTUAL_TOTAL_TIME] as number)
-  if (plan.value.content.Plan) {
-    flatten(nodes, plan.value.content.Plan)
-    _.each(plan.value.ctes, (cte) => {
-      flatten(nodes, cte)
-    })
-  }
-})
-
-function flatten(output: Node[], node: Node) {
-  // [level, node, isLastSibbling, branches]
-  output.push(node)
-  _.each(node.Plans, (subnode) => {
-    flatten(output, subnode)
-  })
-}
+const nodes = computed(() => _.flatten(store.flat).map((row) => row.node))
 
 function durationPercent(nodes: Node[]) {
   return _.sumBy(nodes, NodeProp.EXCLUSIVE_DURATION) / executionTime.value
@@ -40,8 +22,8 @@ function durationPercent(nodes: Node[]) {
 
 const perTable = computed(() => {
   const tables: { [key: string]: Node[] } = _.groupBy(
-    _.filter(nodes, (n) => n[NodeProp.RELATION_NAME] !== undefined),
-    NodeProp.RELATION_NAME
+    _.filter(nodes.value, (n) => n[NodeProp.RELATION_NAME] !== undefined),
+    NodeProp.RELATION_NAME,
   )
   const values: StatsTableItemType[] = []
   _.each(tables, (nodes, tableName) => {
@@ -58,8 +40,8 @@ const perTable = computed(() => {
 
 const perFunction = computed(() => {
   const functions: { [key: string]: Node[] } = _.groupBy(
-    _.filter(nodes, (n) => n[NodeProp.FUNCTION_NAME] !== undefined),
-    NodeProp.FUNCTION_NAME
+    _.filter(nodes.value, (n) => n[NodeProp.FUNCTION_NAME] !== undefined),
+    NodeProp.FUNCTION_NAME,
   )
   const values: StatsTableItemType[] = []
   _.each(functions, (nodes, functionName) => {
@@ -76,8 +58,8 @@ const perFunction = computed(() => {
 
 const perNodeType = computed(() => {
   const nodeTypes: { [key: string]: Node[] } = _.groupBy(
-    nodes,
-    NodeProp.NODE_TYPE
+    nodes.value,
+    NodeProp.NODE_TYPE,
   )
   const values: StatsTableItemType[] = []
   _.each(nodeTypes, (nodes, nodeType) => {
@@ -94,8 +76,8 @@ const perNodeType = computed(() => {
 
 const perIndex = computed(() => {
   const indexes: { [key: string]: Node[] } = _.groupBy(
-    _.filter(nodes, (n) => n[NodeProp.INDEX_NAME] !== undefined),
-    NodeProp.INDEX_NAME
+    _.filter(nodes.value, (n) => n[NodeProp.INDEX_NAME] !== undefined),
+    NodeProp.INDEX_NAME,
   )
   const values: StatsTableItemType[] = []
   _.each(indexes, (nodes, indexName) => {
@@ -117,31 +99,31 @@ const perIndex = computed(() => {
       <div class="col">
         <div class="card">
           <div class="card-body">
-            <sorted-table
+            <SortedTable
               class="table table-sm mb-0"
               :values="perTable"
               sort="time"
               :dir="SortDirection.desc"
             >
-              <thead class="table-secondary">
+              <thead>
                 <tr>
                   <th scope="col">
-                    <sort-link name="name">Table</sort-link>
+                    <SortLink name="name">Table</SortLink>
                   </th>
                   <th scope="col" class="text-end">
-                    <sort-link name="count">Count</sort-link>
+                    <SortLink name="count">Count</SortLink>
                   </th>
                   <th scope="col" colspan="2" class="text-end">
-                    <sort-link name="time">Time</sort-link>
+                    <SortLink name="time">Time</SortLink>
                   </th>
                 </tr>
               </thead>
               <template v-slot:body="sort">
                 <template v-for="value in sort.values" :key="value">
-                  <stats-table-item
+                  <StatsTableItem
                     :value="value as StatsTableItemType"
                     :executionTime="executionTime"
-                  ></stats-table-item>
+                  ></StatsTableItem>
                 </template>
               </template>
               <tbody v-if="!perTable.length">
@@ -151,38 +133,38 @@ const perIndex = computed(() => {
                   </td>
                 </tr>
               </tbody>
-            </sorted-table>
+            </SortedTable>
           </div>
         </div>
       </div>
       <div class="col">
         <div class="card">
           <div class="card-body">
-            <sorted-table
+            <SortedTable
               class="table table-sm mb-0"
               :values="perFunction"
               sort="time"
               :dir="SortDirection.desc"
             >
-              <thead class="table-secondary">
+              <thead>
                 <tr>
                   <th scope="col">
-                    <sort-link name="name">Function</sort-link>
+                    <SortLink name="name">Function</SortLink>
                   </th>
                   <th scope="col" class="text-end">
-                    <sort-link name="count">Count</sort-link>
+                    <SortLink name="count">Count</SortLink>
                   </th>
                   <th scope="col" colspan="2" class="text-end">
-                    <sort-link name="time">Time</sort-link>
+                    <SortLink name="time">Time</SortLink>
                   </th>
                 </tr>
               </thead>
               <template v-slot:body="sort">
                 <template v-for="value in sort.values" :key="value">
-                  <stats-table-item
+                  <StatsTableItem
                     :value="value as StatsTableItemType"
                     :executionTime="executionTime"
-                  ></stats-table-item>
+                  ></StatsTableItem>
                 </template>
               </template>
               <tbody v-if="!perFunction.length">
@@ -192,72 +174,72 @@ const perIndex = computed(() => {
                   </td>
                 </tr>
               </tbody>
-            </sorted-table>
+            </SortedTable>
           </div>
         </div>
       </div>
       <div class="col">
         <div class="card">
           <div class="card-body">
-            <sorted-table
+            <SortedTable
               class="table table-sm mb-0"
               :values="perNodeType"
               sort="time"
               :dir="SortDirection.desc"
             >
-              <thead class="table-secondary">
+              <thead>
                 <tr>
                   <th scope="col">
-                    <sort-link name="name">Node Type</sort-link>
+                    <SortLink name="name">Node Type</SortLink>
                   </th>
                   <th scope="col" class="text-end">
-                    <sort-link name="count">Count</sort-link>
+                    <SortLink name="count">Count</SortLink>
                   </th>
                   <th scope="col" colspan="2" class="text-end">
-                    <sort-link name="time">Time</sort-link>
+                    <SortLink name="time">Time</SortLink>
                   </th>
                 </tr>
               </thead>
               <template v-slot:body="sort">
                 <template v-for="value in sort.values" :key="value">
-                  <stats-table-item
+                  <StatsTableItem
                     :value="value as StatsTableItemType"
                     :executionTime="executionTime"
-                  ></stats-table-item>
+                  ></StatsTableItem>
                 </template>
               </template>
-            </sorted-table>
+            </SortedTable>
           </div>
         </div>
       </div>
       <div class="col">
         <div class="card">
           <div class="card-body">
-            <sorted-table
+            <SortedTable
               class="table table-sm mb-0"
               :values="perIndex"
               sort="time"
               :dir="SortDirection.desc"
             >
-              <thead class="table-secondary">
+              <thead>
                 <tr>
                   <th scope="col">
-                    <sort-link name="name">Index</sort-link>
+                    <SortLink name="name">Index</SortLink>
                   </th>
                   <th scope="col" class="text-end">
-                    <sort-link name="count">Count</sort-link>
+                    <SortLink name="count">Count</SortLink>
                   </th>
                   <th scope="col" colspan="2" class="text-end">
-                    <sort-link name="time">Time</sort-link>
+                    <SortLink name="time">Time</SortLink>
                   </th>
                 </tr>
               </thead>
               <template v-slot:body="sort">
                 <template v-for="value in sort.values" :key="value">
-                  <stats-table-item
+                  <StatsTableItem
                     :value="value as StatsTableItemType"
                     :executionTime="executionTime"
-                  ></stats-table-item>
+                  ></StatsTableItem>
                 </template>
               </template>
               <tbody v-if="!perIndex.length">
@@ -267,7 +249,7 @@ const perIndex = computed(() => {
                   </td>
                 </tr>
               </tbody>
-            </sorted-table>
+            </SortedTable>
           </div>
         </div>
       </div>

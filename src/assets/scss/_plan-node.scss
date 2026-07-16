@@ -1,7 +1,6 @@
 @use "sass:math";
 
 $compact-width: 50px;
-$bg-color: #fff;
 .execution-memory-node {
   border-radius: 4px;
   padding: 10px 8px;
@@ -11,7 +10,6 @@ $bg-color: #fff;
 .plan-node {
   cursor: default;
   text-decoration: none;
-  color: $text-color;
   display: inline-block;
   position: relative;
   font-size: $font-size-sm;
@@ -22,13 +20,12 @@ $bg-color: #fff;
 
   .plan-node-body {
     position: relative;
-    border: 1px solid $line-color;
     border-radius: $border-radius-base;
-    background-color: $plan-node-bg;
-    box-shadow: 1px 1px 3px 0px rgba(0,0,0,0.1);
+    box-shadow: 1px 1px 3px 0px rgba(0, 0, 0, 0.1);
 
     &.card {
-      .card-body, .card-header {
+      .card-body,
+      .card-header {
         padding: $padding-base $padding-lg;
       }
 
@@ -58,7 +55,6 @@ $bg-color: #fff;
       font-weight: 600;
       margin: 0;
       line-height: inherit;
-      color: black !important;
     }
 
     .node-duration {
@@ -74,10 +70,17 @@ $bg-color: #fff;
     table-layout: fixed;
   }
 
+  .node-detail-toggle {
+    cursor: pointer;
+    &:hover {
+      background-color: var(--bs-secondary-bg);
+    }
+  }
+
   //hovers
   &:hover,
   &.highlight {
-    $hover-color: rgba(0,0,0,0.4);
+    $hover-color: rgba(0, 0, 0, 0.4);
     .plan-node-body {
       box-shadow: 1px 1px 5px 0px $hover-color;
     }
@@ -86,11 +89,10 @@ $bg-color: #fff;
     }
   }
 
-
   &.selected {
     .plan-node-body {
       border-color: $highlight-color;
-      box-shadow: 0px 0px 5px 2px rgba($highlight-color,0.4);
+      box-shadow: 0px 0px 5px 2px rgba($highlight-color, 0.4);
     }
 
     .workers > div {
@@ -115,16 +117,12 @@ $bg-color: #fff;
     border: 0;
   }
 
-  .text-secondary {
-    color: $text-color-light;
-  }
-
   .plan-query-container {
-    border: 1px solid $line-color;
+    border: 1px solid var(--bs-border-color);
     padding: $padding-xl;
-    background-color: #fff;
+    background-color: var(--bs-body-bg);
     position: absolute;
-    box-shadow: 0px 0px 10px 2px rgba(0,0,0,0.3);
+    box-shadow: 0px 0px 10px 2px rgba(0, 0, 0, 0.3);
     border-radius: $border-radius-base;
     margin-bottom: $padding-xl;
     z-index: 1;
@@ -134,55 +132,21 @@ $bg-color: #fff;
       font-size: $font-size-lg;
       width: 93%;
       text-align: left;
-      border-bottom: 1px solid $line-color;
+      border-bottom: 1px solid var(--bs-border-color);
       padding-bottom: $padding-base;
       margin-bottom: $padding-lg;
     }
   }
 
-  &.never-executed .plan-node-body {
-    @extend %bg-hatched;
-  }
 
   .workers {
-    position: absolute;
-    left: -1px;
-    top: 1px;
-    width: 100%;
-    height: 100%;
-    cursor: pointer;
-
     > div {
-      border: 1px solid $gray-light;
       border-radius: $border-radius-base;
-      background-color: $white;
-      width: 100%;
-      height: 100%;
-      position: absolute;
-    }
-  }
-
-  .workers-handle {
-    cursor: pointer;
-    position: absolute;
-    top: 0;
-    right: -5px;
-    > div {
-      position: absolute;
-      top: 0;
-      background-color: white;
-      border: 1px solid darken($gray-lightest, 3);
-      border-radius: $border-radius-base;
-
-      &:hover {
-        background-color: $gray-lightest;
-        border-color: $gray-light;
-      }
     }
   }
 
   .subplan-name {
-    background-color: #B3D7D7;
+    background-color: var(--bs-info-bg-subtle);
     border-radius: $border-radius-base;
   }
 
@@ -194,7 +158,7 @@ $bg-color: #fff;
       display: none;
     }
   }
-  button[aria-expanded='true'] {
+  button[aria-expanded="true"] {
     .fa-chevron-right {
       display: none !important;
     }
@@ -207,24 +171,6 @@ $bg-color: #fff;
     overflow: initial;
     white-space: initial;
     text-overflow: initial;
-  }
-}
-
-.node-bar-container {
-  height: 5px;
-  margin-top: $padding-lg;
-  margin-bottom: $padding-sm;
-  border-radius: $border-radius-lg;
-  background-color: $gray-light;
-  position: relative;
-
-  .node-bar {
-    border-radius: $border-radius-lg;
-    height: 100%;
-    text-align: left;
-    position: absolute;
-    left: 0;
-    top: 0;
   }
 }
 

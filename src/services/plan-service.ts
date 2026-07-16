@@ -15,12 +15,13 @@ import type {
   IPlan,
   IPlanContent,
   IPlanStats,
+  ISerialization,
   JIT,
   Slice,
   SortGroups,
+  Worker,
 } from "@/interfaces"
-import { Node, Worker } from "@/interfaces"
-import clarinet from "clarinet"
+import { Node } from "@/interfaces"
 
 interface NodeElement {
   node: Node
@@ -32,14 +33,20 @@ interface JitElement {
   node: object
 }
 
+type recurseItemType = Array<[Node, recurseItemType]>
+
 export class PlanService {
-  private static instance: PlanService
   private nodeId = 0
+  private flat: Node[] = []
+
+  private recurse(nodes: Node[]): recurseItemType {
+    return _.map(nodes, (node) => [node, this.recurse(node[NodeProp.PLANS])])
+  }
 
   public createPlan(
     planName: string,
     planContent: IPlanContent,
-    planQuery: string
+    planQuery: string,
   ): IPlan {
     // remove any extra white spaces in the middle of query
     // (\S) start match after any non-whitespace character => group 1
@@ -47,10 +54,6 @@ export class PlanService {
     // (\s{2,}) group of 2 or more white spaces
     // '$1 ' reuse group 1 and and a single space
     planQuery = planQuery.replace(/(\S)(?!$)(\s{2,})/gm, "$1 ")
-
-    if (!planContent.Plan) {
-      throw new Error("Invalid plan")
-    }
 
     const plan: IPlan = {
       id: NodeProp.PEV_PLAN_TAG + new Date().getTime().toString(),
@@ -65,7 +68,18 @@ export class PlanService {
     }
 
     this.nodeId = 1
+    this.flat = []
     this.processNode(planContent.Plan, plan)
+
+    this.flat = this.flat.concat(
+      _.flattenDeep(this.recurse([plan.content.Plan as Node])),
+    )
+    _.each(plan.ctes, (cte) => {
+      this.flat = this.flat.concat(_.flattenDeep(this.recurse([cte as Node])))
+    })
+
+    this.fixCteScansDuration(plan)
+    this.fixInitPlanUsageDuration(plan)
     this.calculateMaximums(plan)
     return plan
   }
@@ -113,32 +127,22 @@ export class PlanService {
   }
 
   public calculateMaximums(plan: IPlan) {
-    type recurseItemType = Array<[Node, recurseItemType]>
-    function recurse(nodes: Node[]): recurseItemType {
-      return _.map(nodes, (node) => [node, recurse(node[NodeProp.PLANS])])
-    }
-    let flat: Node[] = []
-    flat = flat.concat(_.flattenDeep(recurse([plan.content.Plan as Node])))
-    _.each(plan.ctes, (cte) => {
-      flat = flat.concat(_.flattenDeep(recurse([cte as Node])))
-    })
-
-    const largest = _.maxBy(flat, NodeProp.ACTUAL_ROWS_REVISED)
+    const largest = _.maxBy(this.flat, NodeProp.ACTUAL_ROWS_REVISED)
     if (largest) {
       plan.content.maxRows = largest[NodeProp.ACTUAL_ROWS_REVISED] as number
     }
 
-    const costliest = _.maxBy(flat, NodeProp.EXCLUSIVE_COST)
+    const costliest = _.maxBy(this.flat, NodeProp.EXCLUSIVE_COST)
     if (costliest) {
       plan.content.maxCost = costliest[NodeProp.EXCLUSIVE_COST] as number
     }
 
-    const totalCostliest = _.maxBy(flat, NodeProp.TOTAL_COST)
+    const totalCostliest = _.maxBy(this.flat, NodeProp.TOTAL_COST)
     if (totalCostliest) {
       plan.content.maxTotalCost = totalCostliest[NodeProp.TOTAL_COST] as number
     }
 
-    const slowest = _.maxBy(flat, NodeProp.EXCLUSIVE_DURATION)
+    const slowest = _.maxBy(this.flat, NodeProp.EXCLUSIVE_DURATION)
     if (slowest) {
       plan.content.maxDuration = slowest[NodeProp.EXCLUSIVE_DURATION] as number
     }
@@ -155,7 +159,7 @@ export class PlanService {
         (o[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS] as number)
       )
     }
-    const highestShared = _.maxBy(flat, (o) => {
+    const highestShared = _.maxBy(this.flat, (o) => {
       return sumShared(o)
     }) as Node
     if (highestShared && sumShared(highestShared)) {
@@ -168,7 +172,7 @@ export class PlanService {
         (o[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS] as number)
       )
     }
-    const highestTemp = _.maxBy(flat, (o) => {
+    const highestTemp = _.maxBy(this.flat, (o) => {
       return sumTemp(o)
     }) as Node
     if (highestTemp && sumTemp(highestTemp)) {
@@ -183,7 +187,7 @@ export class PlanService {
         (o[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS] as number)
       )
     }
-    const highestLocal = _.maxBy(flat, (o) => {
+    const highestLocal = _.maxBy(this.flat, (o) => {
       return sumLocal(o)
     })
     if (highestLocal && sumLocal(highestLocal)) {
@@ -195,11 +199,11 @@ export class PlanService {
     }
     function sumIo(o: Node) {
       return (
-        (o[NodeProp.EXCLUSIVE_IO_READ_TIME] as number) +
-        (o[NodeProp.EXCLUSIVE_IO_WRITE_TIME] as number)
+        (o[NodeProp.EXCLUSIVE_SUM_IO_READ_TIME] as number) +
+        (o[NodeProp.EXCLUSIVE_SUM_IO_WRITE_TIME] as number)
       )
     }
-    const highestIo = _.maxBy(flat, (o) => {
+    const highestIo = _.maxBy(this.flat, (o) => {
       return sumIo(o)
     })
     if (highestIo && sumIo(highestIo)) {
@@ -207,12 +211,12 @@ export class PlanService {
     }
 
     const highestEstimateFactor = _.max(
-      _.map(flat, (node) => {
+      _.map(this.flat, (node) => {
         const f = node[NodeProp.PLANNER_ESTIMATE_FACTOR]
         if (f !== Infinity) {
           return f
         }
-      })
+      }),
     ) as number
     plan.content.maxEstimateFactor = highestEstimateFactor * 2 || 1
   }
@@ -222,7 +226,7 @@ export class PlanService {
     if (!_.isUndefined(node[NodeProp.ACTUAL_TOTAL_TIME])) {
       // since time is reported for an invidual loop, actual duration must be adjusted by number of loops
       // number of workers is also taken into account
-      const workers = (node[NodeProp.WORKERS_PLANNED_BY_GATHER] || 0) + 1
+      const workers = (node[NodeProp.WORKERS_LAUNCHED_BY_GATHER] || 0) + 1
       node[NodeProp.ACTUAL_TOTAL_TIME] =
         ((node[NodeProp.ACTUAL_TOTAL_TIME] as number) *
           (node[NodeProp.ACTUAL_LOOPS] as number)) /
@@ -231,7 +235,7 @@ export class PlanService {
         ((node[NodeProp.ACTUAL_STARTUP_TIME] as number) *
           (node[NodeProp.ACTUAL_LOOPS] as number)) /
         workers
-      node[NodeProp.EXCLUSIVE_DURATION] = node[NodeProp.ACTUAL_TOTAL_TIME]
+      node[NodeProp.EXCLUSIVE_DURATION] = node[NodeProp.ACTUAL_TOTAL_TIME] as number
 
       const duration =
         (node[NodeProp.EXCLUSIVE_DURATION] as number) -
@@ -244,10 +248,7 @@ export class PlanService {
     }
 
     _.each(node[NodeProp.PLANS], (subPlan) => {
-      if (
-        subPlan[NodeProp.PARENT_RELATIONSHIP] !== "InitPlan" &&
-        subPlan[NodeProp.TOTAL_COST]
-      ) {
+      if (subPlan[NodeProp.TOTAL_COST]) {
         node[NodeProp.EXCLUSIVE_COST] =
           (node[NodeProp.EXCLUSIVE_COST] as number) -
           (subPlan[NodeProp.TOTAL_COST] as number)
@@ -264,6 +265,7 @@ export class PlanService {
         "PLAN_ROWS",
         "ROWS_REMOVED_BY_FILTER",
         "ROWS_REMOVED_BY_JOIN_FILTER",
+        "ROWS_REMOVED_BY_INDEX_RECHECK",
       ],
       (prop: keyof typeof NodeProp) => {
         if (!_.isUndefined(node[NodeProp[prop]])) {
@@ -272,18 +274,114 @@ export class PlanService {
           const revised = <number>node[NodeProp[prop]] * loops
           node[NodeProp[revisedProp] as unknown as keyof typeof Node] = revised
         }
-      }
+      },
     )
   }
 
-  // recursive function to get the sum of actual durations of a a node children
+  public fixCteScansDuration(plan: IPlan) {
+    // No need for fix if plan is not analyzed
+    if (!plan.isAnalyze) {
+      return
+    }
+
+    // Iterate over the CTEs
+    _.each(plan.ctes, (cte) => {
+      // Time spent in the CTE itself
+      const cteDuration = cte[NodeProp.ACTUAL_TOTAL_TIME] || 0
+
+      // Find all nodes that are "CTE Scan" for the given CTE
+      const cteScans = _.filter(
+        this.flat,
+        (node) =>
+          `CTE ${node[NodeProp.CTE_NAME]}` == cte[NodeProp.SUBPLAN_NAME],
+      )
+
+      // Sum of exclusive time for the CTE Scans
+      const sumScansDuration = _.sumBy(
+        cteScans,
+        (node) => node[NodeProp.EXCLUSIVE_DURATION],
+      )
+
+      // Subtract exclusive time proportionally
+      _.each(cteScans, (node) => {
+        node[NodeProp.EXCLUSIVE_DURATION] = Math.max(
+          0,
+          node[NodeProp.EXCLUSIVE_DURATION] -
+            (cteDuration * (node[NodeProp.ACTUAL_TOTAL_TIME] || 0)) /
+              sumScansDuration,
+        )
+      })
+    })
+  }
+
+  public fixInitPlanUsageDuration(plan: IPlan) {
+    // No need for fix if plan is not analyzed
+    if (!plan.isAnalyze) {
+      return
+    }
+
+    // Find all initPlans
+    const initPlans = _.filter(
+      this.flat,
+      (node) => node[NodeProp.PARENT_RELATIONSHIP] == "InitPlan",
+    )
+
+    _.each(initPlans, (subPlan) => {
+      // Get the sub plan name
+      // It can be either:
+      //  - InitPlan 2 (returns $1) -> $1
+      //  - InitPlan 2 -> InitPlan 2
+      if (!subPlan[NodeProp.SUBPLAN_NAME]) {
+        return
+      }
+      const matches = /(InitPlan\s+[1-9]+)(?:\s+\(returns (\$[0-9]+)\))*/m.exec(
+        subPlan[NodeProp.SUBPLAN_NAME] as string,
+      )
+      if (!matches) {
+        return
+      }
+      const name = matches[2] || matches[1]
+
+      // Find all nodes that are using data from this InitPlan
+      // There should be the name of the sub plan somewhere in the extra info
+      _.each(
+        _.filter(
+          this.flat,
+          (node) => node[NodeProp.PARENT_RELATIONSHIP] != "InitPlan",
+        ),
+        (node) => {
+          _.each(node, (value) => {
+            if (typeof value != "string") {
+              return
+            }
+            // Value for node property should contain sub plan name (with a number
+            // matching exactly)
+            const matches = new RegExp(
+              `.*${name.replace(/[^a-zA-Z0-9]/g, "\\$&")}[0-9]?`,
+            ).exec(value)
+            if (matches) {
+              node[NodeProp.EXCLUSIVE_DURATION] -=
+                subPlan[NodeProp.ACTUAL_TOTAL_TIME] || 0
+              // Stop iterating for this node
+              return false
+            }
+          })
+        },
+      )
+    })
+  }
+
+  // function to get the sum of actual durations of a a node children
   public childrenDuration(node: Node, duration: number) {
     _.each(node[NodeProp.PLANS], (child) => {
       // Subtract sub plans duration from this node except for InitPlans
       // (ie. CTE)
-      if (child[NodeProp.PARENT_RELATIONSHIP] !== "InitPlan") {
-        duration += child[NodeProp.EXCLUSIVE_DURATION] || 0 // Duration may not be set
-        duration = this.childrenDuration(child, duration)
+      if (
+        child[NodeProp.PARENT_RELATIONSHIP] !== "InitPlan" ||
+        (child[NodeProp.PARENT_RELATIONSHIP] == "InitPlan" &&
+          node[NodeProp.NODE_TYPE] == "Result")
+      ) {
+        duration += child[NodeProp.ACTUAL_TOTAL_TIME] || 0 // Duration may not be set
       }
     })
     return duration
@@ -315,7 +413,7 @@ export class PlanService {
     // Remove frames around, handles |, ║,
     source = source.replace(/^(\||║|│)(.*)\1\r?\n/gm, "$2\n")
     // Remove frames at the end of line, handles |, ║,
-    source = source.replace(/(.*)(\||║|│)$\r?\n/gm, "$1\n")
+    source = source.replace(/^(.*)(\||║|│)$\r?\n/gm, "$1\n")
 
     // Remove separator lines from various types of borders
     source = source.replace(/^\+-+\+\r?\n/gm, "")
@@ -353,19 +451,15 @@ export class PlanService {
   public fromSource(source: string) {
     source = this.cleanupSource(source)
 
-    let isJson = false
     try {
-      isJson = JSON.parse(source)
+      const data = JSON.parse(source)
+      return this.getPlanContent(data)
     } catch {
-      // continue
+      if (/^(\s*)(\[|\{)\s*\n.*?\1(\]|\})\s*/gms.exec(source)) {
+        return this.fromJson(source)
+      }
+      return this.fromText(source)
     }
-
-    if (isJson) {
-      return this.parseJson(source)
-    } else if (/^(\s*)(\[|\{)\s*\n.*?\1(\]|\})\s*/gms.exec(source)) {
-      return this.fromJson(source)
-    }
-    return this.fromText(source)
   }
 
   public fromJson(source: string) {
@@ -400,71 +494,19 @@ export class PlanService {
       // Replace two double quotes (added by pgAdmin)
       .replace(/""/gm, '"')
 
-    return this.parseJson(useSource)
+    const data = JSON.parse(useSource)
+    return this.getPlanContent(data)
   }
 
-  // Stream parse JSON as it can contain duplicate keys (workers)
-  public parseJson(source: string) {
-    const parser = clarinet.parser()
-    type JsonElement = { [key: string]: JsonElement | null }
-    const elements: (JsonElement | never[])[] = []
-    let root: JsonElement | JsonElement[] | null = null
-    // Store the level and duplicated object|array
-    let duplicated: [number, JsonElement | null] | null = null
-    parser.onvalue = (v: JsonElement) => {
-      const current = elements[elements.length - 1] as JsonElement
-      if (_.isArray(current)) {
-        current.push(v)
-      } else {
-        const keys = Object.keys(current)
-        const lastKey = keys[keys.length - 1]
-        current[lastKey] = v
-      }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private getPlanContent(value: any): IPlanContent {
+    if (Array.isArray(value)) {
+      value = value[0]
     }
-    parser.onopenobject = (key: string) => {
-      const o: JsonElement = {}
-      o[key] = null
-      elements.push(o)
+    if (!value.Plan) {
+      throw new Error("Invalid plan")
     }
-    parser.onkey = (key: string) => {
-      const current = elements[elements.length - 1] as JsonElement
-      const keys = Object.keys(current)
-      if (keys.indexOf(key) !== -1) {
-        duplicated = [elements.length - 1, current[key]]
-      } else {
-        current[key] = null
-      }
-    }
-    parser.onopenarray = () => {
-      elements.push([])
-    }
-    parser.oncloseobject = parser.onclosearray = () => {
-      const popped = elements.pop() as JsonElement
-
-      if (!elements.length) {
-        root = popped
-      } else {
-        const current = elements[elements.length - 1] as JsonElement
-
-        if (duplicated && duplicated[0] === elements.length - 1) {
-          _.merge(duplicated[1], popped)
-          duplicated = null
-        } else {
-          if (_.isArray(current)) {
-            current.push(popped)
-          } else {
-            const keys = Object.keys(current)
-            const lastKey = keys[keys.length - 1]
-            current[lastKey] = popped
-          }
-        }
-      }
-    }
-    parser.write(source).close()
-    if (Array.isArray(root)) {
-      root = root[0]
-    }
-    return root
+    return value
   }
 
   public splitIntoLines(text: string): string[] {
@@ -484,13 +526,17 @@ export class PlanService {
     }
 
     _.each(lines, (line: string) => {
-      if (countChar(line, /\)/g) > countChar(line, /\(/g)) {
-        // if there more closing parenthesis this means that it's the
-        // continuation of a previous line
+      const previousLine = out[out.length - 1]
+      if (
+        previousLine &&
+        countChar(previousLine, /\)/g) != countChar(previousLine, /\(/g)
+      ) {
+        // if number of opening/closing parenthesis doesn't match in the
+        // previous line, this means the current line is the continuation of previous line
         out[out.length - 1] += line
       } else if (
         line.match(
-          /^(?:Total\s+runtime|Planning\s+time|Memory\s+used|\s+\(slice\d+\)|Optimizer|Execution\s+time|Time|Filter|Output|JIT)/i
+          /^(?:Total\s+runtime|Planning(\s+time)?|Memory\s+used|\s+\(slice\d+\)|Optimizer|Execution\s+time|Time|Filter|Output|JIT|Trigger|Settings|Serialization)/i,
         )
       ) {
         out.push(line)
@@ -506,11 +552,13 @@ export class PlanService {
         }
       } else if (
         0 < out.length &&
-        out[out.length - 1].match(/^\s*Output/i) &&
-        !sameIndent(out[out.length - 1], line) &&
+        previousLine.match(/^.*,\s*$/) &&
+        !sameIndent(previousLine, line) &&
         !line.match(/^\s*->/i)
       ) {
-        // If previous line was Output and current line is not same indent
+        // If previous line was an info line (Output, Sort Key, … with a list
+        // of items separated by coma ",")
+        // and current line is not same indent
         // (which would mean a new information line)
         out[out.length - 1] += line
       } else {
@@ -528,6 +576,137 @@ export class PlanService {
     // Array to keep reference to previous nodes with there depth
     const elementsAtDepth: ElementAtDepth[] = []
 
+    const indentationRegex = /^\s*/
+    const emptyLineRegex = /^s*$/
+    const headerRegex = /^\\s*(QUERY|---|#).*$/
+
+    const prefixPattern = "^(\\s*->\\s*|\\s*)"
+    const partialPattern = "(Finalize|Simple|Partial)*"
+    const typePattern = "([^\\r\\n\\t\\f\\v\\(]*?)"
+    // tslint:disable-next-line:max-line-length
+    const estimationPattern =
+      "\\(cost=(\\d+\\.\\d+)\\.\\.(\\d+\\.\\d+)\\s+rows=(\\d+)\\s+width=(\\d+)\\)"
+    const nonCapturingGroupOpen = "(?:"
+    const nonCapturingGroupClose = ")"
+    const openParenthesisPattern = "\\("
+    const closeParenthesisPattern = "\\)"
+    // tslint:disable-next-line:max-line-length
+    const actualPattern =
+      "(?:actual(?:\\stime=(\\d+\\.\\d+)\\.\\.(\\d+\\.\\d+))?\\srows=(\\d+(?:\\.\\d+)?)\\sloops=(\\d+)|(never\\s+executed))"
+    const optionalGroup = "?"
+
+    // Gather Motion、Broadcast Motion and Redistribute Motion
+    const motion =
+      "(?:(\\d+)+:(\\d+)+\\s+\\((slice\\d+);\\s*segments:\\s*(\\d+)+\\))?"
+    // dynamic scan node
+    const dynamic = "(?:\\(dynamic scan id:\\s*(\\d+)\\))?"
+    
+    // tslint:disable-next-line:max-line-length
+    const subRegex =
+      /^(\s*)((?:Sub|Init)Plan)\s*(?:\d+\s*)?\s*(?:\(returns.*\)\s*)?$/gm
+
+    const cteRegex = /^(\s*)CTE\s+(\S+)\s*$/g
+
+    enum TriggerMatch {
+      Name = 2,
+      Time,
+      Calls,
+    }
+    const triggerRegex =
+      /^(\s*)Trigger\s+(.*):\s+time=(\d+\.\d+)\s+calls=(\d+)\s*$/
+
+    enum WorkerMatch {
+      Number = 2,
+      ActualTimeFirst,
+      ActualTimeLast,
+      ActualRows,
+      ActualLoops,
+      NeverExecuted,
+      Extra,
+    }
+    const workerRegex = new RegExp(
+      "^(\\s*)Worker\\s+(\\d+):\\s+" +
+        nonCapturingGroupOpen +
+        actualPattern +
+        nonCapturingGroupClose +
+        optionalGroup +
+        "(.*)" +
+        "\\s*$",
+    )
+
+    const jitRegex = /^(\s*)JIT:\s*$/
+
+    enum SerializationMatch {
+      Time = 2,
+      Output = 3
+    }
+    const serializationRegex =
+      /^(\s*)Serialization:\s+time=(\d+\.\d+) ms.*output=(\d+).*$/
+
+    const extraRegex = /^(\s*)(\S.*\S)\s*$/
+
+    enum NodeMatch {
+      Prefix = 1,
+      PartialMode,
+      Type,
+      DynamicScanId,
+      DataSliceCount,
+      NodeCount,
+      SliceId,
+      SegmentsCount,
+      EstimatedStartupCost1,
+      EstimatedTotalCost1,
+      EstimatedRows,
+      EstimatedRowWidth,
+      ActualTimeFirst1,
+      ActualTimeLast1,
+      ActualRows1,
+      ActualLoops1,
+      NeverExecuted1,
+      EstimatedStartupCost2,
+      EstimatedTotalCost2,
+      EstimatedRows2,
+      EstimatedRowWidth2,
+      ActualTimeFirst2,
+      ActualTimeLast2,
+      ActualRows2,
+      ActualLoops2,
+      NeverExecuted2,
+    }
+
+    const nodeRegex = new RegExp(
+      prefixPattern +
+        partialPattern +
+        "\\s*" +
+        typePattern +
+        "\\s*" +
+        dynamic +
+        "\\s*" +
+        motion +
+        "\\s*" +
+        nonCapturingGroupOpen +
+        (nonCapturingGroupOpen +
+          estimationPattern +
+          "\\s+" +
+          openParenthesisPattern +
+          actualPattern +
+          closeParenthesisPattern +
+          nonCapturingGroupClose) +
+        "|" +
+        nonCapturingGroupOpen +
+        estimationPattern +
+        nonCapturingGroupClose +
+        "|" +
+        nonCapturingGroupOpen +
+        openParenthesisPattern +
+        actualPattern +
+        closeParenthesisPattern +
+        nonCapturingGroupClose +
+        nonCapturingGroupClose +
+        "\\s*$",
+      "m",
+    )
+
     _.each(lines, (line: string) => {
       // Remove any trailing "
       line = line.replace(/"\s*$/, "")
@@ -536,231 +715,134 @@ export class PlanService {
       // Replace tabs with 4 spaces
       line = line.replace(/\t/gm, "    ")
 
-      const indentationRegex = /^\s*/
       const match = line.match(indentationRegex)
       const depth = match ? match[0].length : 0
       // remove indentation
       line = line.replace(indentationRegex, "")
 
-      const emptyLineRegex = "^s*$"
-      const headerRegex = "^\\s*(QUERY|---|#).*$"
-      const prefixRegex = "^(\\s*->\\s*|\\s*)"
-      const typeRegex = "([^\\r\\n\\t\\f\\v\\:\\(]*?)"
-      // tslint:disable-next-line:max-line-length
-      const estimationRegex =
-        "\\(cost=(\\d+\\.\\d+)\\.\\.(\\d+\\.\\d+)\\s+rows=(\\d+)\\s+width=(\\d+)\\)"
-      const nonCapturingGroupOpen = "(?:"
-      const nonCapturingGroupClose = ")"
-      const openParenthesisRegex = "\\("
-      const closeParenthesisRegex = "\\)"
-      // tslint:disable-next-line:max-line-length
-      const actualRegex =
-        "(?:actual\\stime=(\\d+\\.\\d+)\\.\\.(\\d+\\.\\d+)\\srows=(\\d+(?:\\.\\d+)?)\\sloops=(\\d+)|actual\\srows=(\\d+(?:\\.\\d+)?)\\sloops=(\\d+)|(never\\s+executed))"
-      const optionalGroup = "?"
+      const emptyLineMatches = emptyLineRegex.exec(line)
+      const headerMatches = headerRegex.exec(line)
 
-      const emptyLineMatches = new RegExp(emptyLineRegex).exec(line)
-      const headerMatches = new RegExp(headerRegex).exec(line)
-
-      // Gather Motion、Broadcast Motion and Redistribute Motion
-      const motion =
-      "(?:(\\d+)+:(\\d+)+\\s+\\((slice\\d+);\\s*segments:\\s*(\\d+)+\\))?"
-      // dynamic scan node
-      const dynamic = "(\\(dynamic scan id:\\s*(\\d+)\\))?"
-
-      /*
-       * Groups
-       * 1: prefix
-       * 2: type
-       * 3: dynamic_scan
-       * 4: dynamic_scan_id
-       * 5: data_slice_count
-       * 6: node_count
-       * 7: slice_id
-       * 8: segments_count
-       * 9: estimated_startup_cost
-       * 10: estimated_total_cost
-       * 11: estimated_rows
-       * 12: estimated_row_width
-       * 13: actual_time_first
-       * 14: actual_time_last
-       * 15: actual_rows
-       * 16: actual_loops
-       * 17: actual_rows_
-       * 18: actual_loops_
-       * 19: never_executed
-       * 20: estimated_startup_cost
-       * 21: estimated_total_cost
-       * 22: estimated_rows
-       * 23: estimated_row_width
-       * 24: actual_time_first
-       * 25: actual_time_last
-       * 26: actual_rows
-       * 27: actual_loops
-       */
-      const nodeRegex = new RegExp(
-        prefixRegex +
-          typeRegex +
-          "\\s*" +
-          dynamic +
-          "\\s*" +
-          motion +
-          "\\s*" +
-          nonCapturingGroupOpen +
-          (nonCapturingGroupOpen +
-            estimationRegex +
-            "\\s+" +
-            openParenthesisRegex +
-            actualRegex +
-            closeParenthesisRegex +
-            nonCapturingGroupClose) +
-          "|" +
-          nonCapturingGroupOpen +
-          estimationRegex +
-          nonCapturingGroupClose +
-          "|" +
-          nonCapturingGroupOpen +
-          openParenthesisRegex +
-          actualRegex +
-          closeParenthesisRegex +
-          nonCapturingGroupClose +
-          nonCapturingGroupClose +
-          "\\s*$",
-        "gm"
-      )
       const nodeMatches = nodeRegex.exec(line)
-
-      // tslint:disable-next-line:max-line-length
-      const subRegex =
-        /^(\s*)((?:Sub|Init)Plan)\s*(?:\d+\s*)?\s*(?:\(returns.*\)\s*)?$/gm
       const subMatches = subRegex.exec(line)
 
-      const cteRegex = /^(\s*)CTE\s+(\S+)\s*$/g
       const cteMatches = cteRegex.exec(line)
-
-      /*
-       * Groups
-       * 2: trigger name
-       * 3: time
-       * 4: calls
-       */
-      const triggerRegex =
-        /^(\s*)Trigger\s+(.*):\s+time=(\d+\.\d+)\s+calls=(\d+)\s*$/g
       const triggerMatches = triggerRegex.exec(line)
-
-      /*
-       * Groups
-       * 2: Worker number
-       * 3: actual_time_first
-       * 4: actual_time_last
-       * 5: actual_rows
-       * 6: actual_loops
-       * 7: actual_rows_
-       * 8: actual_loops_
-       * 9: never_executed
-       * 10: extra
-       */
-      const workerRegex = new RegExp(
-        /^(\s*)Worker\s+(\d+):\s+/.source +
-          nonCapturingGroupOpen +
-          actualRegex +
-          nonCapturingGroupClose +
-          optionalGroup +
-          "(.*)" +
-          "\\s*$",
-        "g"
-      )
       const workerMatches = workerRegex.exec(line)
-
-      const jitRegex = /^(\s*)JIT:\s*$/g
       const jitMatches = jitRegex.exec(line)
+      const serializationMatches = serializationRegex.exec(line)
 
-      const extraRegex = /^(\s*)(\S.*\S)\s*$/g
       const extraMatches = extraRegex.exec(line)
 
-       /*
-       * Groups
-       * 1: slice num
-       * 2: average memory
-       * 3: number of worker threads
-       * 4: maximum memory
-       * 5: worke memory
-       */
       const sliceRegex = /\(slice(\d+)\)\s+(?:Executor\s+memory:\s*)?(?:(\d+?K\s+bytes))?(?:\s+avg\s+x\s+(\d+)?\s+workers)?(?:,\s*(\d+?K\s+bytes)\s+max\s+\(seg\d+\))?(?:\.\s+Work_mem:\s*(\d+?K\s+bytes)\s+max\.)?/
       const sliceMathches = sliceRegex.exec(line)
 
       if (emptyLineMatches || headerMatches) {
         return
       } else if (nodeMatches && !cteMatches && !subMatches) {
-        //const prefix = nodeMatches[1]
-        const neverExecuted = nodeMatches[19]
-        const newNode: Node = new Node(nodeMatches[2])
+        //const prefix = nodeMatches[NodeMatch.Prefix]
+        const neverExecuted =
+          nodeMatches[NodeMatch.NeverExecuted1] ||
+          nodeMatches[NodeMatch.NeverExecuted2]
+        const newNode: Node = new Node(nodeMatches[NodeMatch.Type])
+        if (nodeMatches[NodeMatch.DynamicScanId]) {
+          newNode[NodeProp.DYNAMIC_SCAN_ID] = parseInt(
+            nodeMatches[NodeMatch.DynamicScanId],
+            10,
+          )
+        }
 
-        if (nodeMatches[4]) {
-          newNode[NodeProp.DYNAMIC_SCAN_ID] = parseInt(nodeMatches[4])
-        }
         if (
-          nodeMatches[5] &&
-          nodeMatches[6] &&
-          nodeMatches[7] &&
-          nodeMatches[8]
+          nodeMatches[NodeMatch.DataSliceCount] &&
+          nodeMatches[NodeMatch.NodeCount] &&
+          nodeMatches[NodeMatch.SliceId] &&
+          nodeMatches[NodeMatch.SegmentsCount]
         ) {
-          newNode[NodeProp.DATA_SLICE_COUNT] = parseInt(nodeMatches[5])
-          newNode[NodeProp.NODE_COUNT] = parseInt(nodeMatches[6])
-          newNode[NodeProp.SLICE_ID] = nodeMatches[7]
-          newNode[NodeProp.SEGMENTS_COUNT] = parseInt(nodeMatches[8])
+          newNode[NodeProp.DATA_SLICE_COUNT] = parseInt(
+            nodeMatches[NodeMatch.DataSliceCount],
+            10,
+          )
+
+          newNode[NodeProp.NODE_COUNT] = parseInt(
+            nodeMatches[NodeMatch.NodeCount],
+            10,
+          )
+
+          newNode[NodeProp.SLICE_ID] =
+            nodeMatches[NodeMatch.SliceId]
+
+          newNode[NodeProp.SEGMENTS_COUNT] = parseInt(
+            nodeMatches[NodeMatch.SegmentsCount],
+            10,
+          )
         }
-        
         if (
-          (nodeMatches[9] && nodeMatches[10]) ||
-          (nodeMatches[20] && nodeMatches[21])
+          (nodeMatches[NodeMatch.EstimatedStartupCost1] && nodeMatches[NodeMatch.EstimatedTotalCost1]) ||
+          (nodeMatches[NodeMatch.EstimatedStartupCost2] && nodeMatches[NodeMatch.EstimatedTotalCost2])
         ) {
           newNode[NodeProp.STARTUP_COST] = parseFloat(
-            nodeMatches[9] || nodeMatches[20]
+            nodeMatches[NodeMatch.EstimatedStartupCost1] ||
+              nodeMatches[NodeMatch.EstimatedStartupCost2],
           )
           newNode[NodeProp.TOTAL_COST] = parseFloat(
-            nodeMatches[10] || nodeMatches[21]
+            nodeMatches[NodeMatch.EstimatedTotalCost1] ||
+              nodeMatches[NodeMatch.EstimatedTotalCost2],
           )
           newNode[NodeProp.PLAN_ROWS] = parseInt(
-            nodeMatches[11] || nodeMatches[22],
-            0
+            nodeMatches[NodeMatch.EstimatedRows] ||
+              nodeMatches[NodeMatch.EstimatedRows2],
+            0,
           )
           newNode[NodeProp.PLAN_WIDTH] = parseInt(
-            nodeMatches[12] || nodeMatches[23],
-            0
+            nodeMatches[NodeMatch.EstimatedRowWidth] ||
+              nodeMatches[NodeMatch.EstimatedRowWidth2],
+            0,
           )
         }
         if (
-          (nodeMatches[13] && nodeMatches[14]) ||
-          (nodeMatches[24] && nodeMatches[25])
+          (nodeMatches[NodeMatch.ActualTimeFirst1] &&
+            nodeMatches[NodeMatch.ActualTimeLast1]) ||
+          (nodeMatches[NodeMatch.ActualTimeFirst2] &&
+            nodeMatches[NodeMatch.ActualTimeLast2])
         ) {
           newNode[NodeProp.ACTUAL_STARTUP_TIME] = parseFloat(
-            nodeMatches[13] || nodeMatches[24]
+            nodeMatches[NodeMatch.ActualTimeFirst1] ||
+              nodeMatches[NodeMatch.ActualTimeFirst2],
           )
           newNode[NodeProp.ACTUAL_TOTAL_TIME] = parseFloat(
-            nodeMatches[14] || nodeMatches[25]
+            nodeMatches[NodeMatch.ActualTimeLast1] ||
+              nodeMatches[NodeMatch.ActualTimeLast2],
           )
         }
 
         if (
-          (nodeMatches[15] && nodeMatches[16]) ||
-          (nodeMatches[17] && nodeMatches[18]) ||
-          (nodeMatches[26] && nodeMatches[27])
+          (nodeMatches[NodeMatch.ActualRows1] &&
+            nodeMatches[NodeMatch.ActualLoops1]) ||
+          (nodeMatches[NodeMatch.ActualRows2] &&
+            nodeMatches[NodeMatch.ActualLoops2])
         ) {
-          const actual_rows = nodeMatches[15] || nodeMatches[17] || nodeMatches[26]
+          const actual_rows =
+            nodeMatches[NodeMatch.ActualRows1] ||
+            nodeMatches[NodeMatch.ActualRows2]
           if (actual_rows.indexOf(".") != -1) {
             newNode[NodeProp.ACTUAL_ROWS_FRACTIONAL] = true
           }
           newNode[NodeProp.ACTUAL_ROWS] = parseFloat(actual_rows)
           newNode[NodeProp.ACTUAL_LOOPS] = parseInt(
-            nodeMatches[16] || nodeMatches[18] || nodeMatches[27],
-            0
+            nodeMatches[NodeMatch.ActualLoops1] ||
+              nodeMatches[NodeMatch.ActualLoops2],
+            0,
           )
+        }
+
+        if (nodeMatches[NodeMatch.PartialMode]) {
+          newNode[NodeProp.PARTIAL_MODE] = nodeMatches[NodeMatch.PartialMode]
         }
 
         if (neverExecuted) {
           newNode[NodeProp.ACTUAL_LOOPS] = 0
           newNode[NodeProp.ACTUAL_ROWS] = 0
-          newNode[NodeProp.ACTUAL_TOTAL_TIME] = 0
+          newNode[NodeProp.ACTUAL_TOTAL_TIME] = undefined
         }
         const element = {
           node: newNode,
@@ -825,7 +907,7 @@ export class PlanService {
         elementsAtDepth.push([depth, element])
       } else if (workerMatches) {
         //const prefix = workerMatches[1]
-        const workerNumber = parseInt(workerMatches[2], 0)
+        const workerNumber = parseInt(workerMatches[WorkerMatch.Number], 0)
         const previousElement = _.last(elementsAtDepth)?.[1] as NodeElement
         if (!previousElement) {
           return
@@ -835,23 +917,38 @@ export class PlanService {
         }
         let worker = this.getWorker(previousElement.node, workerNumber)
         if (!worker) {
-          worker = new Worker(workerNumber)
+          worker = {[WorkerProp.WORKER_NUMBER]: workerNumber}
           previousElement.node[NodeProp.WORKERS]?.push(worker)
         }
-        if (workerMatches[3] && workerMatches[4]) {
-          worker[NodeProp.ACTUAL_STARTUP_TIME] = parseFloat(workerMatches[3])
-          worker[NodeProp.ACTUAL_TOTAL_TIME] = parseFloat(workerMatches[4])
-          worker[NodeProp.ACTUAL_ROWS] = parseInt(workerMatches[5], 0)
-          worker[NodeProp.ACTUAL_LOOPS] = parseInt(workerMatches[6], 0)
+        if (
+          workerMatches[WorkerMatch.ActualTimeFirst] &&
+          workerMatches[WorkerMatch.ActualTimeLast]
+        ) {
+          worker[NodeProp.ACTUAL_STARTUP_TIME] = parseFloat(
+            workerMatches[WorkerMatch.ActualTimeFirst],
+          )
+          worker[NodeProp.ACTUAL_TOTAL_TIME] = parseFloat(
+            workerMatches[WorkerMatch.ActualTimeLast],
+          )
+          worker[NodeProp.ACTUAL_ROWS] = parseInt(
+            workerMatches[WorkerMatch.ActualRows],
+            0,
+          )
+          worker[NodeProp.ACTUAL_LOOPS] = parseInt(
+            workerMatches[WorkerMatch.ActualLoops],
+            0,
+          )
         }
 
-        if (this.parseSort(workerMatches[10], worker)) {
+        if (this.parseSort(workerMatches[WorkerMatch.Extra], worker)) {
           return
         }
 
         // extra info
-        const info = workerMatches[10].split(/: (.+)/).filter((x) => x)
-        if (workerMatches[10]) {
+        const info = workerMatches[WorkerMatch.Extra]
+          .split(/: (.+)/)
+          .filter((x) => x)
+        if (workerMatches[WorkerMatch.Extra]) {
           if (!info[1]) {
             return
           }
@@ -859,14 +956,13 @@ export class PlanService {
           worker[property] = info[1]
         }
       } else if (triggerMatches) {
-        //const prefix = triggerMatches[1]
         // Remove elements from elementsAtDepth for deeper levels
         _.remove(elementsAtDepth, (e) => e[0] >= depth)
         root.Triggers = root.Triggers || []
         root.Triggers.push({
-          "Trigger Name": triggerMatches[2],
-          Time: this.parseTime(triggerMatches[3]),
-          Calls: triggerMatches[4],
+          "Trigger Name": triggerMatches[TriggerMatch.Name],
+          Time: this.parseTime(triggerMatches[TriggerMatch.Time]),
+          Calls: triggerMatches[TriggerMatch.Calls],
         })
       } else if (jitMatches) {
         let element
@@ -883,7 +979,7 @@ export class PlanService {
           }
           if (_.last(lastElement.node?.[NodeProp.WORKERS])) {
             const worker: Worker = _.last(
-              lastElement.node?.[NodeProp.WORKERS]
+              lastElement.node?.[NodeProp.WORKERS],
             ) as Worker
             worker.JIT = {} as JIT
             element = {
@@ -892,6 +988,15 @@ export class PlanService {
             elementsAtDepth.push([depth, element])
           }
         }
+      } else if (serializationMatches) {
+        root.Serialization = {
+          Time: parseFloat(serializationMatches[SerializationMatch.Time]),
+          "Output Volume": parseInt(serializationMatches[SerializationMatch.Output])
+        } as ISerialization
+        const element = {
+          node: root.Serialization
+        }
+        elementsAtDepth.push([1, element])
       } else if (sliceMathches) {
         _.remove(elementsAtDepth, (e) => e[0] >= depth || depth == 1)
         root.Slice = root.Slice || []
@@ -1007,19 +1112,18 @@ export class PlanService {
   }
 
   private parseSort(text: string, el: Node | Worker): boolean {
-    /*
-     * Groups
-     * 2: Sort Method
-     * 3: Sort Space Type
-     * 4: Sort Space Used
-     */
+    enum SortMatch {
+      Method = 2,
+      SpaceType,
+      SpaceUsed,
+    }
     const sortRegex =
       /^(\s*)Sort Method:\s+(.*)\s+(Memory|Disk):\s+(?:(\S*)kB)\s*$/g
     const sortMatches = sortRegex.exec(text)
     if (sortMatches) {
-      el[NodeProp.SORT_METHOD] = sortMatches[2].trim()
-      el[NodeProp.SORT_SPACE_USED] = sortMatches[4]
-      el[NodeProp.SORT_SPACE_TYPE] = sortMatches[3]
+      el[NodeProp.SORT_METHOD] = sortMatches[SortMatch.Method].trim()
+      el[NodeProp.SORT_SPACE_USED] = sortMatches[SortMatch.SpaceUsed]
+      el[NodeProp.SORT_SPACE_TYPE] = sortMatches[SortMatch.SpaceType]
       return true
     }
     return false
@@ -1106,29 +1210,90 @@ export class PlanService {
     const iotimingsRegex = /I\/O Timings:\s+(.*)\s*$/g
     const iotimingsMatches = iotimingsRegex.exec(text)
 
-    /*
-     * Groups:
-     * 1: type
-     * 2: info
-     */
-    if (iotimingsMatches) {
-      // Initiate with default value
+    if (!iotimingsMatches) {
+      return false
+    }
+
+    const scopeRegex =
+      /\b(shared\/local|shared|local|temp)((?:\s+(?:read|write)=\d+(?:\.\d+)?)+)/g
+    const operationRegex = /(read|write)=(\d+(?:\.\d+)?)/g
+
+    const results = []
+    let scopeMatch
+    let operationMatch
+
+    // 1. Handle scoped timings like "local read=10 write=20"
+    while ((scopeMatch = scopeRegex.exec(text)) !== null) {
+      const scope = scopeMatch[1]
+      const operationsString = scopeMatch[2]
+
+      const entry = { scope, read: 0, write: 0 }
+
+      while (
+        (operationMatch = operationRegex.exec(operationsString)) !== null
+      ) {
+        entry[operationMatch[1] as "read" | "write"] = parseFloat(
+          operationMatch[2],
+        )
+      }
+
+      results.push(entry)
+    }
+
+    // 2. Handle unscoped timings like "read=0.011" outside of scoped blocks
+    const rest = text.replace(scopeRegex, "")
+    const unscoped = { scope: undefined, read: 0, write: 0 }
+    let found = false
+
+    while ((operationMatch = operationRegex.exec(rest)) !== null) {
+      unscoped[operationMatch[1] as "read" | "write"] = parseFloat(
+        operationMatch[2],
+      )
+      found = true
+    }
+
+    if (found) {
+      results.push(unscoped)
+    }
+
+    const scopeIsDetailed = _.some(results, (result) => {
+      return result.scope == "shared" || result.scope == "local"
+    })
+
+    const scopeIsPartiallyDetailed = _.some(results, (result) => {
+      return result.scope == "shared/local"
+    })
+
+    // Initiate with default value
+    if (scopeIsDetailed) {
+      el[NodeProp.SHARED_IO_READ_TIME] = 0
+      el[NodeProp.SHARED_IO_WRITE_TIME] = 0
+      el[NodeProp.LOCAL_IO_READ_TIME] = 0
+      el[NodeProp.LOCAL_IO_WRITE_TIME] = 0
+    } else {
       el[NodeProp.IO_READ_TIME] = 0
       el[NodeProp.IO_WRITE_TIME] = 0
-
-      _.each(iotimingsMatches[1].split(/\s+/), (timing) => {
-        const s = timing.split(/=/)
-        const method = s[0]
-        const value = parseFloat(s[1])
-        const prop = ("IO_" +
-          _.upperCase(method) +
-          "_TIME") as keyof typeof NodeProp
-        const nodeProp = NodeProp[prop] as unknown as keyof typeof Node
-        el[nodeProp] = value
-      })
-      return true
     }
-    return false
+    if (scopeIsPartiallyDetailed || scopeIsDetailed) {
+      el[NodeProp.TEMP_IO_READ_TIME] = 0
+      el[NodeProp.TEMP_IO_WRITE_TIME] = 0
+    }
+
+    results.forEach((result) => {
+      ;["read", "write"].forEach((operation) => {
+        let prop = `IO_${_.upperCase(operation)}_TIME` as keyof typeof NodeProp
+
+        if (result.scope && result.scope != "shared/local") {
+          prop = (_.upperCase(result.scope) +
+            "_" +
+            prop) as keyof typeof NodeProp
+        }
+        const nodeProp = NodeProp[prop] as unknown as keyof typeof Node
+        el[nodeProp] = result[operation as "read" | "write"]
+      })
+    })
+
+    return true
   }
 
   private parseOptions(text: string, el: Node): boolean {
@@ -1189,7 +1354,7 @@ export class PlanService {
 
   private parseSettings(text: string, el: Node): boolean {
     // Parses a settings block
-    // eg. Timing: Generation 0.340 ms, Inlining 0.000 ms, Optimization 0.168 ms, Emission 1.907 ms, Total 2.414 ms
+    // eg. Settings: constraint_exclusion = 'on', effective_cache_size = '30GB'
 
     const settingsRegex = /^(\s*)Settings:\s*(.*)$/g
     const settingsMatches = settingsRegex.exec(text)
@@ -1222,12 +1387,12 @@ export class PlanService {
         [SortGroupsProp.GROUP_COUNT]: parseInt(matches[2], 0),
         [SortGroupsProp.SORT_METHODS_USED]: _.map(
           matches[3].split(","),
-          _.trim
+          _.trim,
         ),
         [SortGroupsProp.SORT_SPACE_MEMORY]: {
           [SortSpaceMemoryProp.AVERAGE_SORT_SPACE_USED]: parseInt(
             matches[4],
-            0
+            0,
           ),
           [SortSpaceMemoryProp.PEAK_SORT_SPACE_USED]: parseInt(matches[5], 0),
         },
@@ -1260,40 +1425,117 @@ export class PlanService {
       "LOCAL_WRITTEN_BLOCKS",
       "IO_READ_TIME",
       "IO_WRITE_TIME",
+      "SHARED_IO_READ_TIME",
+      "SHARED_IO_WRITE_TIME",
+      "LOCAL_IO_READ_TIME",
+      "LOCAL_IO_WRITE_TIME",
+      "TEMP_IO_READ_TIME",
+      "TEMP_IO_WRITE_TIME",
     ]
     _.each(properties, (property) => {
-      const sum = _.sumBy(node[NodeProp.PLANS], (child: Node) => {
-        return (child[NodeProp[property]] as number) || 0
-      })
+      const sum = Number(
+        _.sumBy(
+          // Don't take subplans into account (InitPlan)
+          _.filter(
+            node[NodeProp.PLANS],
+            (child: Node) => !child[NodeProp.SUBPLAN_NAME],
+          ),
+          (child: Node) => {
+            return (child[NodeProp[property]] as number) || 0
+          },
+        ).toFixed(3),
+      )
       const exclusivePropertyString = ("EXCLUSIVE_" +
         property) as keyof typeof NodeProp
       const nodeProp = NodeProp[
         exclusivePropertyString
       ] as unknown as keyof typeof Node
-      node[nodeProp] = (node[NodeProp[property]] as number) - sum
+      node[nodeProp] = Number(
+        ((node[NodeProp[property]] as number) - sum).toFixed(3),
+      )
     })
   }
 
   private calculateIoTimingsAverage(node: Node) {
-    const ioReadTime = (node[NodeProp["EXCLUSIVE_IO_READ_TIME"]] as number) || 0
-    if (ioReadTime) {
-      const sharedReadBlocks =
-        (node[NodeProp["EXCLUSIVE_SHARED_READ_BLOCKS"]] as number) || 0
-      const localReadBlocks =
-        (node[NodeProp["EXCLUSIVE_LOCAL_READ_BLOCKS"]] as number) || 0
-      node[NodeProp["AVERAGE_IO_READ_SPEED"]] =
-        (sharedReadBlocks + localReadBlocks) / (ioReadTime / 1000)
+    // The matrix to match I/O Timings with Buffers
+    let scopesMatrix
+    if (_.isUndefined(node[NodeProp.TEMP_IO_READ_TIME])) {
+      // pre Pg15
+      scopesMatrix = {
+        "": ["shared", "local", "temp"],
+      }
+    } else if (!_.isUndefined(node[NodeProp.IO_READ_TIME])) {
+      // pg15-16
+      scopesMatrix = {
+        "": ["shared", "local"],
+        temp: ["temp"],
+      }
+    } else {
+      // pg17+
+      scopesMatrix = {
+        shared: ["shared"],
+        local: ["local"],
+        temp: ["temp"],
+      }
     }
+    const operations = ["read", "write"]
+    const buffersOperations = ["read", "written"]
 
-    const ioWriteTime = (node[NodeProp["EXCLUSIVE_IO_WRITE_TIME"]] as number) || 0
-    if (ioWriteTime) {
-      const sharedWriteBlocks =
-        (node[NodeProp["EXCLUSIVE_SHARED_WRITTEN_BLOCKS"]] as number) || 0
-      const localWriteBlocks =
-        (node[NodeProp["EXCLUSIVE_LOCAL_WRITTEN_BLOCKS"]] as number) || 0
-      node[NodeProp["AVERAGE_IO_WRITE_SPEED"]] =
-        (sharedWriteBlocks + localWriteBlocks) / (ioWriteTime / 1000)
-    }
+    _.forEach(scopesMatrix, (buffersScopes, timingScope) => {
+      operations.forEach((operation, index) => {
+        ;["exclusive_", ""].forEach((prefix) => {
+          const timeProp =
+            `${prefix}${timingScope ? timingScope + "_" : ""}io_${operation}_time`.toUpperCase() as keyof typeof NodeProp
+          const speedProp =
+            `${prefix}average_${timingScope ? timingScope + "_" : ""}io_${operation}_speed`.toUpperCase() as keyof typeof NodeProp
+          const time = (node[NodeProp[timeProp]] as number) || 0
+          const buffersOperation = buffersOperations[index]
+          const buffers = _.sumBy(buffersScopes, (bufferScope) => {
+            const bufferProp =
+              `${prefix}${bufferScope}_${buffersOperation}_blocks`.toUpperCase() as keyof typeof NodeProp
+            return (node[NodeProp[bufferProp]] as number) || 0
+          })
+          const buffersProp = `${prefix}${buffersOperation}_blocks`.toUpperCase() as keyof typeof NodeProp;
+          node[NodeProp[buffersProp] as unknown as keyof typeof Node] = buffers;
+          if (time) {
+            node[NodeProp[speedProp] as unknown as keyof typeof Node] = Number(
+              (buffers / (time / 1000)).toFixed(3),
+            )
+          }
+        })
+      })
+    })
+
+    // We also compute sum and average speed for read / write timings for all scopes
+    operations.forEach((operation, index) => {
+      ;["exclusive_", ""].forEach((prefix) => {
+        const sumTimeProp =
+          `${prefix}sum_io_${operation}_time`.toUpperCase() as keyof typeof NodeProp
+        const speedProp =
+          `${prefix}average_sum_io_${operation}_speed`.toUpperCase() as keyof typeof NodeProp
+        let time = 0
+        let buffers = 0
+        _.forEach(scopesMatrix, (buffersScopes, timingScope) => {
+          const timeProp =
+            `${prefix}${timingScope ? timingScope + "_" : ""}io_${operation}_time`.toUpperCase() as keyof typeof NodeProp
+          time += (node[NodeProp[timeProp]] as number) || 0
+          const buffersOperation = buffersOperations[index]
+          buffers += _.sumBy(buffersScopes, (bufferScope) => {
+            const bufferProp =
+              `${prefix}${bufferScope}_${buffersOperation}_blocks`.toUpperCase() as keyof typeof NodeProp
+            return (node[NodeProp[bufferProp]] as number) || 0
+          })
+        })
+        node[NodeProp[sumTimeProp] as unknown as keyof typeof Node] = Number(
+          time.toFixed(3),
+        )
+        if (time) {
+          node[NodeProp[speedProp] as unknown as keyof typeof Node] = Number(
+            (buffers / (time / 1000)).toFixed(3),
+          )
+        }
+      })
+    })
   }
 
   private findOutputProperty(node: Node): boolean {
@@ -1325,6 +1567,10 @@ export class PlanService {
           console.error("Unsupported Aggregate Strategy")
       }
       node[NodeProp.NODE_TYPE] = prefix + "Aggregate"
+    }
+
+    if (node[NodeProp.NODE_TYPE] == "ModifyTable") {
+      node[NodeProp.NODE_TYPE] = node[NodeProp.OPERATION] as string
     }
   }
 }

@@ -27,22 +27,25 @@ open it in your favorite internet browser.
 ### Without building tools
 
 ```html
-<script src="https://unpkg.com/vue@3.2.45/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/pev2/dist/pev2.umd.js"></script>
 <link
-  href="https://unpkg.com/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+  href="https://unpkg.com/bootstrap@5/dist/css/bootstrap.min.css"
   rel="stylesheet"
 />
 <link rel="stylesheet" href="https://unpkg.com/pev2/dist/pev2.css" />
 
-<div id="app">
+<div id="app" class="d-flex flex-column vh-100">
   <pev2 :plan-source="plan" plan-query="" />
 </div>
 
 <script>
   const { createApp } = Vue
 
-  const plan = "Seq Scan on foo  (cost=0.00..155.00 rows=10000 width=4)"
+  const plan = `
+    Aggregate  (cost=12.50..12.51 rows=1 width=8)
+      ->  Seq Scan on employees  (cost=0.00..10.00 rows=1000 width=0)
+  `;
 
   const app = createApp({
     data() {
@@ -101,7 +104,7 @@ add the following in you header (or load them with your favorite bundler).
 
 ```html
 <link
-  href="https://unpkg.com/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+  href="https://unpkg.com/bootstrap@5/dist/css/bootstrap.min.css"
   rel="stylesheet"
 />
 ```

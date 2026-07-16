@@ -1,25 +1,16 @@
 import _ from "lodash"
 import type { IPlan, Node } from "@/interfaces"
-import { NodeProp } from "@/enums"
-import { nodePropTypes, PropType } from "@/enums"
+import { NodeProp, WorkerProp } from "@/enums"
 
-export class HelpService {
-  public nodeId = 0
-
-  public getNodeTypeDescription(nodeType: string) {
-    return NODE_DESCRIPTIONS[nodeType.toUpperCase()]
-  }
-
-  public getHelpMessage(helpMessage: string) {
-    return HELP_MESSAGES[helpMessage.toUpperCase()]
-  }
+export function getNodeTypeDescription(nodeType: string): string | undefined {
+  return NODE_DESCRIPTIONS[nodeType.toUpperCase()]
 }
 
-interface INodeDescription {
-  [key: string]: string
+export function getHelpMessage(helpMessage: string): string | undefined {
+  return HELP_MESSAGES[helpMessage.toUpperCase()]
 }
 
-export const NODE_DESCRIPTIONS: INodeDescription = {
+export const NODE_DESCRIPTIONS: Record<string, string> = {
   LIMIT: "returns a specified number of rows from a record set.",
   SORT: "sorts a record set based on the specified sort key.",
   "NESTED LOOP": `merges two record sets by looping through every record in the first set and
@@ -51,11 +42,7 @@ export const NODE_DESCRIPTIONS: INodeDescription = {
   "GATHER MERGE": `reads the results of the parallel workers, preserving any ordering.`,
 }
 
-interface IHelpMessage {
-  [key: string]: string
-}
-
-export const HELP_MESSAGES: IHelpMessage = {
+export const HELP_MESSAGES: Record<string, string> = {
   "MISSING EXECUTION TIME": `Execution time (or Total runtime) not available for this plan. Make sure you
     use EXPLAIN ANALYZE.`,
   "MISSING PLANNING TIME": "Planning time not available for this plan.",
@@ -78,7 +65,7 @@ export function scrollChildIntoParentView(
   parent: Element,
   child: Element,
   shouldCenter: boolean,
-  done?: () => void
+  done?: () => void,
 ) {
   if (!child) {
     return
@@ -281,7 +268,7 @@ export function findNodeById(plan: IPlan, id: number): Node | undefined {
 
 export function findNodeBySubplanName(
   plan: IPlan,
-  subplanName: string
+  subplanName: string,
 ): Node | undefined {
   let o: Node | undefined = undefined
   if (plan.ctes) {
@@ -310,6 +297,8 @@ const notMiscProperties: string[] = [
   NodeProp.WORKERS,
   NodeProp.WORKERS_PLANNED,
   NodeProp.WORKERS_LAUNCHED,
+  NodeProp.READ_BLOCKS,
+  NodeProp.WRITTEN_BLOCKS,
   NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS,
   NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS,
   NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS,
@@ -320,6 +309,8 @@ const notMiscProperties: string[] = [
   NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS,
   NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS,
   NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS,
+  NodeProp.EXCLUSIVE_READ_BLOCKS,
+  NodeProp.EXCLUSIVE_WRITTEN_BLOCKS,
   NodeProp.SHARED_HIT_BLOCKS,
   NodeProp.SHARED_READ_BLOCKS,
   NodeProp.SHARED_DIRTIED_BLOCKS,
@@ -340,10 +331,46 @@ const notMiscProperties: string[] = [
   NodeProp.HASH_CONDITION,
   NodeProp.EXCLUSIVE_IO_READ_TIME,
   NodeProp.EXCLUSIVE_IO_WRITE_TIME,
+  NodeProp.EXCLUSIVE_SHARED_IO_READ_TIME,
+  NodeProp.EXCLUSIVE_SHARED_IO_WRITE_TIME,
+  NodeProp.EXCLUSIVE_LOCAL_IO_READ_TIME,
+  NodeProp.EXCLUSIVE_LOCAL_IO_WRITE_TIME,
+  NodeProp.EXCLUSIVE_TEMP_IO_READ_TIME,
+  NodeProp.EXCLUSIVE_TEMP_IO_WRITE_TIME,
+  NodeProp.EXCLUSIVE_AVERAGE_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_IO_WRITE_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_WRITE_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_WRITE_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_WRITE_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_IO_WRITE_SPEED,
+  NodeProp.EXCLUSIVE_SUM_IO_READ_TIME,
+  NodeProp.EXCLUSIVE_SUM_IO_WRITE_TIME,
+  NodeProp.EXCLUSIVE_AVERAGE_SUM_IO_READ_SPEED,
+  NodeProp.EXCLUSIVE_AVERAGE_SUM_IO_WRITE_SPEED,
   NodeProp.AVERAGE_IO_READ_SPEED,
   NodeProp.AVERAGE_IO_WRITE_SPEED,
-  NodeProp.IO_READ_TIME, // Exclusive value already shown in IO tab
-  NodeProp.IO_WRITE_TIME, // Exclusive value already shown in IO tab
+  NodeProp.AVERAGE_SHARED_IO_READ_SPEED,
+  NodeProp.AVERAGE_SHARED_IO_WRITE_SPEED,
+  NodeProp.AVERAGE_LOCAL_IO_READ_SPEED,
+  NodeProp.AVERAGE_LOCAL_IO_WRITE_SPEED,
+  NodeProp.AVERAGE_TEMP_IO_READ_SPEED,
+  NodeProp.AVERAGE_TEMP_IO_WRITE_SPEED,
+  NodeProp.IO_READ_TIME,
+  NodeProp.IO_WRITE_TIME,
+  NodeProp.SHARED_IO_READ_TIME,
+  NodeProp.SHARED_IO_WRITE_TIME,
+  NodeProp.LOCAL_IO_READ_TIME,
+  NodeProp.LOCAL_IO_WRITE_TIME,
+  NodeProp.TEMP_IO_READ_TIME,
+  NodeProp.TEMP_IO_WRITE_TIME,
+  NodeProp.SUM_IO_READ_TIME,
+  NodeProp.SUM_IO_WRITE_TIME,
+  NodeProp.AVERAGE_SUM_IO_READ_SPEED,
+  NodeProp.AVERAGE_SUM_IO_WRITE_SPEED,
   NodeProp.HEAP_FETCHES,
   NodeProp.WAL_RECORDS,
   NodeProp.WAL_BYTES,
@@ -351,21 +378,26 @@ const notMiscProperties: string[] = [
   NodeProp.NODE_ID,
   NodeProp.ROWS_REMOVED_BY_FILTER,
   NodeProp.ROWS_REMOVED_BY_JOIN_FILTER,
+  NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK,
   NodeProp.ACTUAL_ROWS_REVISED,
   NodeProp.PLAN_ROWS_REVISED,
   NodeProp.ROWS_REMOVED_BY_FILTER_REVISED,
   NodeProp.ROWS_REMOVED_BY_JOIN_FILTER_REVISED,
+  NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK_REVISED,
   "size", // Manually added to use FlexTree
   NodeProp.RELATION_NAME,
   NodeProp.ALIAS,
   NodeProp.FUNCTION_NAME,
   NodeProp.STRATEGY,
+  NodeProp.PARTIAL_MODE,
+  NodeProp.SCAN_DIRECTION,
+  NodeProp.ACTUAL_ROWS_FRACTIONAL,
 ]
 
 export function shouldShowProp(key: string, value: unknown): boolean {
   return (
     (!!value ||
-      nodePropTypes[key] === PropType.increment ||
+      key === WorkerProp.WORKER_NUMBER ||
       key === NodeProp.ACTUAL_ROWS) &&
     notMiscProperties.indexOf(key) === -1
   )

@@ -5,7 +5,6 @@ import {
   reactive,
   ref,
   nextTick,
-  onBeforeMount,
   onBeforeUnmount,
   onMounted,
   provide,
@@ -13,17 +12,9 @@ import {
 } from "vue"
 import { Splitpanes, Pane } from "splitpanes"
 
-import type {
-  IBlocksStats,
-  IPlan,
-  IPlanContent,
-  IPlanStats,
-  Node,
-  Settings,
-} from "@/interfaces"
+import type { Node } from "@/interfaces"
 import {
   HighlightedNodeIdKey,
-  PlanKey,
   SelectedNodeIdKey,
   SelectNodeKey,
   ViewOptionsKey,
@@ -35,12 +26,20 @@ import LogoImage from "@/components/LogoImage.vue"
 import PlanNode from "@/components/PlanNode.vue"
 import PlanStats from "@/components/PlanStats.vue"
 import Stats from "@/components/Stats.vue"
-import { PlanService } from "@/services/plan-service"
+import AnimatedEdge from "@/components/AnimatedEdge.vue"
 import { findNodeById } from "@/services/help-service"
 import { HighlightType, NodeProp } from "@/enums"
 import { json_, pgsql_ } from "@/filters"
+import { setDefaultProps } from "vue-tippy"
+import { store } from "@/store.ts"
+
+setDefaultProps({
+  theme: "bootstrap",
+})
 
 import "tippy.js/dist/tippy.css"
+import "tippy.js/dist/border.css"
+import "@/assets/css/tippy-bootstrap.css"
 import * as d3 from "d3"
 import {
   flextree,
@@ -64,31 +63,33 @@ const version = __APP_VERSION__
 
 const rootEl = ref(null) // The root Element of this instance
 const activeTab = ref<string>("")
-const queryText = ref<string>("")
-const parsed = ref<boolean>(false)
-const plan = ref<IPlan>()
 const planEl = ref()
-const planStats = reactive<IPlanStats>({} as IPlanStats)
-const rootNode = computed(() => plan.value && plan.value.content.Plan)
-const Slice = computed(() => plan.value && plan.value.content.Slice)
+
+const rootNode = computed(() => store.plan && store.plan.content.Plan)
+const slices = computed(() => store.plan?.content.Slice)
 const showSlice = ref<boolean>(true)
-// Determine if there is a Data Segments attribute
-const hasDataSegments = computed(() => {
-  if (!rootNode.value || !rootNode.value.Plans) {
+
+function containsDataSegments(node?: Node): boolean {
+  if (!node) {
     return false
   }
-  const plans = rootNode.value.Plans
-  for (let i = 0; i < plans.length; i++) {
-    if (plans[i]["Data Slice Count"] !== undefined) {
-      return true
-    }
+  
+  if (node[NodeProp.DATA_SLICE_COUNT] !== undefined) {
+    return true
   }
-  return false
-})
+  
+  return node.Plans?.some(containsDataSegments) ?? false
+}
+  
+// Determine if there is a Data Segments attribute
+const hasDataSegments = computed(() =>
+  containsDataSegments(rootNode.value),
+)
 const selectedNodeId = ref<number>(NaN)
 const selectedNode = ref<Node | undefined>(undefined)
 const highlightedNodeId = ref<number>(NaN)
 const gridIsNotNew = localStorage.getItem("gridIsNotNew")
+const ready = ref(false)
 
 const viewOptions = reactive({
   showHighlightBar: false,
@@ -96,8 +97,6 @@ const viewOptions = reactive({
   highlightType: HighlightType.NONE,
   diagramWidth: 20,
 })
-
-const planService = new PlanService()
 
 // Vertical padding between 2 nodes in the tree layout
 const padding = 40
@@ -112,7 +111,7 @@ const scale = ref(1)
 const edgeWeight = computed(() => {
   return d3
     .scaleLinear()
-    .domain([0, planStats.maxRows])
+    .domain([0, store.stats.maxRows])
     .range([1, padding / 1.5])
 })
 const minScale = 0.2
@@ -142,57 +141,41 @@ const layout = flextree({
 
 const tree = ref(layout.hierarchy({}))
 
-onBeforeMount(() => {
+onMounted(() => {
+  watch(() => [props.planSource, props.planQuery], parseAndShow, {
+    immediate: true,
+  })
+})
+
+function parseAndShow() {
+  ready.value = false
+  store.parse(props.planSource, props.planQuery)
   const savedOptions = localStorage.getItem("viewOptions")
   if (savedOptions) {
     _.assignIn(viewOptions, JSON.parse(savedOptions))
   }
-  let planJson: IPlanContent
-  try {
-    planJson = planService.fromSource(props.planSource) as IPlanContent
-    parsed.value = true
-    setActiveTab("plan")
-  } catch {
-    parsed.value = false
-    plan.value = undefined
-    return
-  }
-  queryText.value = planJson["Query Text"] || props.planQuery
-  plan.value = planService.createPlan("", planJson, queryText.value)
-  const content = plan.value.content
-  planStats.executionTime =
-    (content["Execution Time"] as number) ||
-    (content["Total Runtime"] as number) ||
-    NaN
-  planStats.planningTime = (content["Planning Time"] as number) || NaN
-  planStats.maxRows = content.maxRows || NaN
-  planStats.maxCost = content.maxCost || NaN
-  planStats.memoryUsed = (content["Memory used"] as number) || NaN
-  planStats.optimizer = (content["Optimizer"] as string) || ""
-  planStats.maxDuration = content.maxDuration || NaN
-  planStats.maxBlocks = content.maxBlocks || ({} as IBlocksStats)
-  planStats.maxIo = content.maxIo || NaN
-  planStats.maxEstimateFactor = content.maxEstimateFactor || NaN
-  planStats.triggers = content.Triggers || []
-  planStats.jitTime =
-    (content.JIT && content.JIT.Timing && content.JIT.Timing.Total) || NaN
-  planStats.settings = content.Settings as Settings
-  plan.value.planStats = planStats
+  setActiveTab("plan")
 
   nextTick(() => {
     onHashChange()
   })
   window.addEventListener("hashchange", onHashChange)
-  if (rootNode.value) {
-    tree.value = layout.hierarchy(rootNode.value, (v: Node) => v.Plans)
+  if (store.plan?.content.Plan) {
+    tree.value = layout.hierarchy(
+      store.plan?.content.Plan,
+      (v: Node) => v.Plans,
+    )
   }
   ctes.value = []
-  _.each(plan.value?.ctes, (cte) => {
+  _.each(store.plan?.ctes, (cte) => {
     const tree = layout.hierarchy(cte, (v: Node) => v.Plans)
     ctes.value.push(tree)
   })
-  doLayout()
-})
+  nextTick(() => {
+    initZoom()
+    ready.value = true
+  })
+}
 
 function doLayout() {
   layoutRootNode.value = layout(tree.value)
@@ -253,7 +236,7 @@ function doLayout() {
   })
 }
 
-onMounted(() => {
+function initZoom() {
   if (!planEl.value) {
     return
   }
@@ -267,27 +250,24 @@ onMounted(() => {
       const y1 = extent[3]
       const rect = planEl.value.$el.getBoundingClientRect()
 
-      d3.select(planEl.value.$el)
-        .transition()
-        .call(
-          zoomListener.transform,
-          d3.zoomIdentity
-            .translate(rect.width / 2, 10)
-            .scale(
-              Math.min(
-                1,
-                Math.max(
-                  minScale,
-                  0.8 /
-                    Math.max((x1 - x0) / rect.width, (y1 - y0) / rect.height),
-                ),
+      d3.select(planEl.value.$el).call(
+        zoomListener.transform,
+        d3.zoomIdentity
+          .translate(rect.width / 2, 10)
+          .scale(
+            Math.min(
+              1,
+              Math.max(
+                minScale,
+                0.8 / Math.max((x1 - x0) / rect.width, (y1 - y0) / rect.height),
               ),
-            )
-            .translate(-(x0 + x1) / 2, 10),
-        )
+            ),
+          )
+          .translate(-(x0 + x1) / 2, 10),
+      )
     }
   })
-})
+}
 
 onBeforeUnmount(() => {
   window.removeEventListener("hashchange", onHashChange)
@@ -303,30 +283,28 @@ watch(selectedNodeId, onSelectedNode)
 
 function onSelectedNode(v: number) {
   window.location.hash = v ? "plan/node/" + v : ""
-  if (plan.value && v) {
-    selectedNode.value = findNodeById(plan.value, v)
+  if (store.plan && v) {
+    selectedNode.value = findNodeById(store.plan, v)
   }
 }
 
-const lineGen = computed(() => {
-  return function (link: FlexHierarchyPointLink<object>) {
-    const source = link.source
-    const target = link.target
-    const k = Math.abs(target.y - (source.y + source.ySize) - padding)
-    const path = d3.path()
-    path.moveTo(source.x, source.y)
-    path.lineTo(source.x, source.y + source.ySize - padding)
-    path.bezierCurveTo(
-      source.x,
-      source.y + source.ySize - padding + k / 2,
-      target.x,
-      target.y - k / 2,
-      target.x,
-      target.y,
-    )
-    return path.toString()
-  }
-})
+function lineGen(link: FlexHierarchyPointLink<object>) {
+  const source = link.source
+  const target = link.target
+  const k = Math.abs(target.y - (source.y + source.ySize) - padding)
+  const path = d3.path()
+  path.moveTo(source.x, source.y)
+  path.lineTo(source.x, source.y + source.ySize - padding)
+  path.bezierCurveTo(
+    source.x,
+    source.y + source.ySize - padding + k / 2,
+    target.x,
+    target.y - k / 2,
+    target.x,
+    target.y,
+  )
+  return path.toString()
+}
 
 function onHashChange(): void {
   const reg = /#([a-zA-Z]*)(\/node\/([0-9]*))*/
@@ -361,7 +339,6 @@ function selectNode(nodeId: number, center: boolean): void {
 }
 provide(SelectNodeKey, selectNode)
 provide(ViewOptionsKey, viewOptions)
-provide(PlanKey, plan)
 
 function centerNode(nodeId: number): void {
   const rect = planEl.value.$el.getBoundingClientRect()
@@ -428,7 +405,7 @@ function getLayoutExtent(
 }
 
 function isNeverExecuted(node: Node): boolean {
-  return !!planStats.executionTime && !node[NodeProp.ACTUAL_LOOPS]
+  return !!store.stats.executionTime && !node[NodeProp.ACTUAL_LOOPS]
 }
 
 watch(
@@ -459,7 +436,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
 </script>
 
 <template>
-  <div v-if="!parsed" class="flex-grow-1 d-flex justify-content-center">
+  <div v-if="!store.plan" class="flex-grow-1 d-flex justify-content-center">
     <div class="card align-self-center border-danger w-50">
       <div class="card-body">
         <h5 class="card-title text-danger">Couldn't parse plan</h5>
@@ -473,15 +450,15 @@ function updateNodeSize(node: Node, size: [number, number]) {
               style="max-height: 200px"
             ><code v-html="planSource"></code></pre>
           </div>
-          <copy :content="planSource" />
+          <Copy :content="planSource" />
         </div>
         <p class="card-text text-body-dark">
           The plan you submited couldn't be parsed. This may be a bug. You can
           help us fix it by opening a new issue.
         </p>
         <div class="d-flex align-items-center">
-          <span class="text-secondary">
-            <logo-image />
+          <span class="text-body-tertiary">
+            <LogoImage />
             PEV2 <i>version {{ version }}</i>
           </span>
           <a
@@ -495,7 +472,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
     </div>
   </div>
   <div
-    class="plan-container d-flex flex-column overflow-hidden flex-grow-1 bg-light"
+    class="plan-container d-flex flex-column overflow-hidden flex-grow-1 bg-body-tertiary"
     v-else
     ref="rootEl"
   >
@@ -535,7 +512,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
         <li class="nav-item p-1">
           <a
             class="nav-link px-2 py-0"
-            :class="{ active: activeTab === 'query', disabled: !queryText }"
+            :class="{ active: activeTab === 'query', disabled: !store.query }"
             href="#query"
             >Query</a
           >
@@ -551,7 +528,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
       </ul>
       <div class="ms-auto me-2 small">
         <a href="https://github.com/dalibo/pev2" target="_blank">
-          <logo-image />
+          <LogoImage />
           {{ version }}
         </a>
       </div>
@@ -563,28 +540,30 @@ function updateNodeSize(node: Node, size: [number, number]) {
       >
         <!-- Plan tab -->
         <div class="d-flex flex-column flex-grow-1 overflow-hidden">
-          <PlanStats></PlanStats>
+          <PlanStats />
           <div class="flex-grow-1 d-flex overflow-hidden">
             <div class="flex-grow-1 overflow-hidden">
-              <splitpanes
+              <Splitpanes
                 class="default-theme"
                 @resize="viewOptions.diagramWidth = $event[0].size"
               >
-                <pane
+                <Pane
                   :size="viewOptions.diagramWidth"
-                  class="d-flex flex-column"
-                  v-if="plan"
+                  class="d-flex flex-column bg-body-tertiary"
+                  v-if="store.plan"
                 >
-                  <diagram
+                  <Diagram
                     ref="diagram"
                     class="d-flex flex-column flex-grow-1 overflow-hidden plan-diagram"
-                  >
-                  </diagram>
-                </pane>
-                <pane ref="planEl" class="plan grab-bing position-relative">
+                  />
+                </Pane>
+                <Pane
+                  ref="planEl"
+                  class="plan grab-bing position-relative bg-body-tertiary"
+                >
                   <div
-                    class="position-absolute m-1 p-1 bottom-0 end-0 rounded bg-white d-flex"
-                    v-if="plan"
+                    class="position-absolute m-1 p-1 bottom-0 end-0 rounded d-flex"
+                    v-if="store.plan"
                   >
                     <div class="btn-group btn-group-xs">
                       <button
@@ -609,7 +588,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
                         v-on:click="
                           viewOptions.highlightType = HighlightType.DURATION
                         "
-                        :disabled="!plan.isAnalyze"
+                        :disabled="!store.plan?.isAnalyze"
                       >
                         duration
                       </button>
@@ -645,7 +624,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
                   </div>
                   <div
                     class="position-absolute top-0 end-0 d-flex align-items-center"
-                    v-if="Slice"
+                    v-if="slices?.length"
                   >
                     <span
                       class="text-secondary"
@@ -663,34 +642,35 @@ function updateNodeSize(node: Node, size: [number, number]) {
                       ></FontAwesomeIcon>
                     </span>
                     <div v-if="showSlice" class="plan-node">
-                      <div v-for="(item, index) in Slice" :key="index">
-                        <SliceDetail :memory-details="item"></SliceDetail>
-                      </div>
+                      <SliceDetail
+                        v-for="(item, index) in slices"
+                        :key="index"
+                        :memory-details="item"
+                      />
                     </div>
                   </div>
-                  <svg width="100%" height="100%">
+                  <svg width="100%" height="100%" :class="{ ready }">
                     <g :transform="transform">
                       <!-- Links -->
-                      <path
+                      <AnimatedEdge
                         v-for="(link, index) in toCteLinks"
-                        :key="`linkcte${index}`"
+                        :key="`${store.plan?.id}_linkcte${index}`"
                         :d="lineGen(link)"
-                        stroke="#B3D7D7"
+                        stroke-color="#B3D7D7"
                         :stroke-width="
                           edgeWeight(
                             link.target.data[NodeProp.ACTUAL_ROWS_REVISED],
                           )
                         "
-                        fill="none"
                       />
-                      <path
+                      <AnimatedEdge
                         v-for="(link, index) in layoutRootNode?.links()"
-                        :key="`link${index}`"
+                        :key="`${store.plan?.id}_link${index}`"
                         :d="lineGen(link)"
                         :class="{
                           'never-executed': isNeverExecuted(link.target.data),
                         }"
-                        stroke="grey"
+                        stroke-color="grey"
                         :stroke-width="
                           edgeWeight(
                             link.target.data[NodeProp.ACTUAL_ROWS_REVISED],
@@ -702,7 +682,7 @@ function updateNodeSize(node: Node, size: [number, number]) {
                       <g v-if="hasDataSegments">
                         <text
                           v-for="(item, index) in layoutRootNode?.descendants()"
-                          :key="`text${index}`"
+                          :key="`${store.plan?.id}_node-count-${index}`"
                           :x="item.x + numPositionX"
                           :y="item.y - numPositionY1"
                           font-size="12"
@@ -712,9 +692,10 @@ function updateNodeSize(node: Node, size: [number, number]) {
                         >
                           {{ item.data[NodeProp.NODE_COUNT] }}
                         </text>
+
                         <text
                           v-for="(item, index) in layoutRootNode?.descendants()"
-                          :key="`text${index}`"
+                          :key="`${store.plan?.id}_data-slice-count-${index}`"
                           :x="item.x + numPositionX"
                           :y="item.y + item.ySize - numPositionY2"
                           font-size="12"
@@ -725,17 +706,16 @@ function updateNodeSize(node: Node, size: [number, number]) {
                           {{ item.data[NodeProp.DATA_SLICE_COUNT] }}
                         </text>
                       </g>
-
                       <foreignObject
                         v-for="(item, index) in layoutRootNode?.descendants()"
-                        :key="index"
+                        :key="`${store.plan?.id}_${index}`"
                         :x="item.x - item.xSize / 2"
                         :y="item.y"
                         :width="item.xSize"
                         height="1"
                         ref="root"
                       >
-                        <plan-node
+                        <PlanNode
                           :node="item.data"
                           class="d-flex justify-content-center position-fixed"
                         />
@@ -759,29 +739,27 @@ function updateNodeSize(node: Node, size: [number, number]) {
                           rx="5"
                           ry="5"
                         ></rect>
-                        <path
+                        <AnimatedEdge
                           v-for="(link, index) in cte.links()"
-                          :key="`link${index}`"
+                          :key="`${store.plan?.id}_link${index}`"
                           :d="lineGen(link)"
-                          stroke="grey"
+                          stroke-color="grey"
                           :stroke-width="
                             edgeWeight(
                               link.target.data[NodeProp.ACTUAL_ROWS_REVISED],
                             )
                           "
-                          stroke-linecap="square"
-                          fill="none"
                         />
                         <foreignObject
                           v-for="(item, index) in cte.descendants()"
-                          :key="index"
+                          :key="`${store.plan?.id}_${index}`"
                           :x="item.x - item.xSize / 2"
                           :y="item.y"
                           :width="item.xSize"
                           height="1"
                           ref="root"
                         >
-                          <plan-node
+                          <PlanNode
                             :node="item.data"
                             class="d-flex justify-content-center position-fixed"
                           />
@@ -789,8 +767,8 @@ function updateNodeSize(node: Node, size: [number, number]) {
                       </g>
                     </g>
                   </svg>
-                </pane>
-              </splitpanes>
+                </Pane>
+              </Splitpanes>
             </div>
           </div>
           <!-- end Plan tab -->
@@ -802,8 +780,8 @@ function updateNodeSize(node: Node, size: [number, number]) {
         v-if="activeTab === 'grid'"
       >
         <div class="overflow-hidden d-flex w-100 h-100 flex-column">
-          <plan-stats></plan-stats>
-          <grid class="flex-grow-1 overflow-auto plan-grid"> </grid>
+          <PlanStats />
+          <Grid class="flex-grow-1 overflow-auto plan-grid" />
         </div>
       </div>
       <div
@@ -816,28 +794,28 @@ function updateNodeSize(node: Node, size: [number, number]) {
               class="small p-2 mb-0"
             ><code v-html="json_(planSource)"></code></pre>
           </div>
-          <copy :content="planSource" />
+          <Copy :content="planSource" />
         </div>
       </div>
       <div
         class="tab-pane flex-grow-1 overflow-hidden position-relative"
         :class="{ 'show active': activeTab === 'query' }"
-        v-if="queryText"
+        v-if="store.query"
       >
         <div class="overflow-hidden d-flex w-100 h-100">
           <div class="overflow-auto flex-grow-1">
             <pre
               class="small p-2 mb-0"
-            ><code v-html="pgsql_(queryText)"></code></pre>
+            ><code v-html="pgsql_(store.query)"></code></pre>
           </div>
         </div>
-        <copy :content="queryText" />
+        <Copy :content="store.query" />
       </div>
       <div
         class="tab-pane flex-grow-1 overflow-auto"
         :class="{ 'show active': activeTab === 'stats' }"
       >
-        <stats v-if="plan"></stats>
+        <Stats v-if="store.plan" />
       </div>
     </div>
   </div>
@@ -849,11 +827,14 @@ function updateNodeSize(node: Node, size: [number, number]) {
 @import "splitpanes/dist/splitpanes.css";
 @import "highlight.js/scss/stackoverflow-light.scss";
 
-path {
-  stroke-linecap: butt;
-  &.never-executed {
-    stroke-dasharray: 0.5em;
-    stroke-opacity: 0.5;
+[data-bs-theme="dark"] {
+  @import "highlight.js/scss/stackoverflow-dark.scss";
+}
+
+.ready {
+  rect,
+  foreignObject {
+    transition: all 0.2s ease-in-out;
   }
 }
 </style>

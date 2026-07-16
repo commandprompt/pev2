@@ -1,12 +1,10 @@
 <script lang="ts" setup>
 import { inject, nextTick, onMounted, provide, reactive, ref, watch } from "vue"
-import type { Ref } from "vue"
 import PlanNodeDetail from "@/components/PlanNodeDetail.vue"
 import NodeBadges from "@/components/NodeBadges.vue"
 import type { IPlan, Node, ViewOptions } from "@/interfaces"
 import {
   HighlightedNodeIdKey,
-  PlanKey,
   SelectedNodeIdKey,
   SelectNodeKey,
   ViewOptionsKey,
@@ -15,6 +13,7 @@ import { keysToString, sortKeys } from "@/filters"
 import { HighlightType, NodeProp } from "@/enums"
 import { findNodeBySubplanName } from "@/services/help-service"
 import useNode from "@/node"
+import { store } from "@/store"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import {
   faChevronDown,
@@ -45,7 +44,6 @@ const props = defineProps<Props>()
 const showDetails = ref<boolean>(false)
 
 const node = reactive<Node>(props.node)
-const plan = inject(PlanKey) as Ref<IPlan>
 const updateNodeSize =
   inject<(node: Node, size: [number, number]) => null>("updateNodeSize")
 
@@ -58,7 +56,7 @@ const {
   workersLaunchedCount,
   workersPlannedCount,
   workersPlannedCountReversed,
-} = useNode(plan, node, viewOptions)
+} = useNode(node, viewOptions)
 
 onMounted(async () => {
   updateSize(node)
@@ -92,7 +90,7 @@ watch(selectedNodeId, () => {
 
 function centerCte() {
   const cteNode = findNodeBySubplanName(
-    plan.value,
+    store.plan as IPlan,
     node[NodeProp.CTE_NAME] as string,
   )
   if (cteNode) {
@@ -108,7 +106,6 @@ function centerCte() {
         'text-start plan-node',
         {
           detailed: showDetails,
-          'never-executed': isNeverExecuted,
           parallel: workersPlannedCount,
           selected: selectedNodeId == node.nodeId,
           highlight: highlightedNodeId == node.nodeId,
@@ -120,7 +117,11 @@ function centerCte() {
           {{ node[NodeProp.SUBPLAN_NAME] }}
         </b>
       </div>
-      <div class="workers text-secondary py-0 px-1" v-if="workersPlannedCount">
+      <div
+        class="workers py-0 px-1 h-100 w-100 position-absolute"
+        style="left: -1px; top: 1px"
+        v-if="workersPlannedCount"
+      >
         <div
           v-for="index in workersPlannedCountReversed"
           :key="index"
@@ -128,23 +129,25 @@ function centerCte() {
             top: 1 + index * 2 + 'px',
             left: 1 + (index + 1) * 3 + 'px',
           }"
+          class="border bg-body position-absolute w-100 h-100"
           :class="{ 'border-dashed': index >= workersLaunchedCount }"
-        >
-          {{ index }}
-        </div>
+        ></div>
       </div>
       <div
-        class="plan-node-body card"
+        class="plan-node-body card border"
+        :class="{
+          'never-executed': isNeverExecuted,
+        }"
         @mouseenter="highlightedNodeId = node.nodeId"
         @mouseleave="highlightedNodeId = undefined"
       >
         <div class="card-body header no-focus-outline">
           <header class="mb-0 d-flex justify-content-between">
             <h4
-              class="text-body overflow-hidden btn btn-light text-start py-0 px-1"
+              class="overflow-hidden rounded text-start py-0 px-1 node-detail-toggle"
               @click.prevent.stop="showDetails = !showDetails"
             >
-              <span class="text-secondary">
+              <span class="text-body-tertiary">
                 <FontAwesomeIcon
                   fixed-width
                   :icon="faChevronUp"
@@ -159,7 +162,7 @@ function centerCte() {
               {{ nodeName }}
             </h4>
             <div class="text-nowrap">
-              <node-badges :node="node" />
+              <NodeBadges :node="node" />
               <a
                 class="fw-normal small ms-1"
                 href=""
@@ -200,13 +203,13 @@ function centerCte() {
               "
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">on</span>
+              <span class="text-body-tertiary">on</span>
               <span v-if="node[NodeProp.SCHEMA]"
                 >{{ node[NodeProp.SCHEMA] }}.</span
               >{{ node[NodeProp.RELATION_NAME] }}
               {{ node[NodeProp.FUNCTION_NAME] }}
               <span v-if="node[NodeProp.ALIAS]">
-                <span class="text-secondary">as</span>
+                <span class="text-body-tertiary">as</span>
                 {{ node[NodeProp.ALIAS] }}
               </span>
             </div>
@@ -214,7 +217,7 @@ function centerCte() {
               v-else-if="node[NodeProp.ALIAS]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">on</span>
+              <span class="text-body-tertiary">on</span>
               <span
                 v-html="keysToString(node[NodeProp.ALIAS] as string)"
               ></span>
@@ -223,7 +226,7 @@ function centerCte() {
               v-if="node[NodeProp.GROUP_KEY]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">by</span>
+              <span class="text-body-tertiary">by</span>
               <span
                 v-html="keysToString(node[NodeProp.GROUP_KEY] as string)"
               ></span>
@@ -232,7 +235,7 @@ function centerCte() {
               v-if="node[NodeProp.SORT_KEY]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">by</span>
+              <span class="text-body-tertiary">by</span>
               <span
                 v-html="
                   sortKeys(
@@ -242,15 +245,11 @@ function centerCte() {
                 "
               ></span>
             </div>
-            <div v-if="node[NodeProp.JOIN_TYPE]">
-              {{ node[NodeProp.JOIN_TYPE] }}
-              <span class="text-secondary">join</span>
-            </div>
             <div
               v-if="node[NodeProp.INDEX_NAME]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">using</span>
+              <span class="text-body-tertiary">using</span>
               <span
                 v-html="keysToString(node[NodeProp.INDEX_NAME] as string)"
               ></span>
@@ -259,7 +258,7 @@ function centerCte() {
               v-if="node[NodeProp.HASH_CONDITION]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
-              <span class="text-secondary">on</span>
+              <span class="text-body-tertiary">on</span>
               <span
                 v-html="keysToString(node[NodeProp.HASH_CONDITION] as string)"
               ></span>
@@ -268,9 +267,9 @@ function centerCte() {
               <a class="text-reset" href="" @click.prevent.stop="centerCte">
                 <FontAwesomeIcon
                   :icon="faSearch"
-                  class="text-secondary"
+                  class="text-body-tertiary"
                 ></FontAwesomeIcon>
-                <span class="text-secondary">CTE</span>
+                <span class="text-body-tertiary">CTE</span>
                 {{ node[NodeProp.CTE_NAME] }}
               </a>
             </div>
@@ -282,7 +281,7 @@ function centerCte() {
               highlightValue !== null
             "
           >
-            <div class="progress node-bar-container" style="height: 5px">
+            <div class="progress mt-2 mb-1" style="height: 5px">
               <div
                 class="progress-bar"
                 role="progressbar"
@@ -296,14 +295,17 @@ function centerCte() {
               ></div>
             </div>
             <span class="node-bar-label">
-              <span class="text-secondary"
+              <span class="text-body-tertiary"
                 >{{ viewOptions.highlightType }}:</span
               >
               <span v-html="highlightValue"></span>
             </span>
           </div>
         </div>
-        <plan-node-detail :node="node" v-if="showDetails"></plan-node-detail>
+        <PlanNodeDetail :node="node" v-if="showDetails"></PlanNodeDetail>
+        <div v-if="isNeverExecuted" class="text-end">
+          <span class="text-body-tertiary bg-body px-1"> Never executed </span>
+        </div>
       </div>
     </div>
   </div>

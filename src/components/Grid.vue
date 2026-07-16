@@ -1,81 +1,51 @@
 <script lang="ts" setup>
 import _ from "lodash"
-import { computed, inject, onBeforeMount, onMounted } from "vue"
-import type { Ref } from "vue"
-import type { IPlan, Node, Row } from "@/interfaces"
+import { computed, onMounted } from "vue"
+import type { Node } from "@/interfaces"
 import GridRow from "@/components/GridRow.vue"
-import { PlanKey } from "@/symbols"
 import { NodeProp } from "../enums"
 import LevelDivider from "@/components/LevelDivider.vue"
-const plan = inject(PlanKey) as Ref<IPlan>
-
-const plans: Row[][] = [[]]
-
-onBeforeMount((): void => {
-  flatten(plans[0], 0, plan.value.content.Plan, true, [])
-
-  _.each(plan.value.ctes, (cte) => {
-    const flat: Row[] = []
-    flatten(flat, 0, cte, true, [])
-    plans.push(flat)
-  })
-})
+import { store } from "@/store"
+import type { FlattenedPlanNode } from "@/store"
 
 onMounted((): void => {
   localStorage.setItem("gridIsNotNew", "true")
 })
-
-function flatten(
-  output: Row[],
-  level: number,
-  node: Node,
-  isLast: boolean,
-  branches: number[],
-) {
-  // [level, node, isLastSibbling, branches]
-  output.push([level, node, isLast, _.concat([], branches)])
-  if (!isLast) {
-    branches.push(level)
-  }
-
-  _.each(node.Plans, (subnode) => {
-    flatten(
-      output,
-      level + 1,
-      subnode,
-      subnode === _.last(node.Plans),
-      branches,
-    )
-  })
-  if (!isLast) {
-    branches.pop()
-  }
-}
 
 function isCTE(node: Node): boolean {
   return _.startsWith(node[NodeProp.SUBPLAN_NAME], "CTE")
 }
 
 const hasTime = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_DURATION] || 0 > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_DURATION] || 0 > 1
     })
   })
 })
 
 const hasIORead = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.IO_READ_TIME] || 0 > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return (
+        row.node[NodeProp.IO_READ_TIME] ||
+        row.node[NodeProp.SHARED_IO_READ_TIME] ||
+        row.node[NodeProp.LOCAL_IO_READ_TIME] ||
+        row.node[NodeProp.TEMP_IO_READ_TIME]
+      )
     })
   })
 })
 
 const hasIOWrite = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.IO_WRITE_TIME] || 0 > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return (
+        row.node[NodeProp.IO_WRITE_TIME] ||
+        row.node[NodeProp.SHARED_IO_WRITE_TIME] ||
+        row.node[NodeProp.LOCAL_IO_WRITE_TIME] ||
+        row.node[NodeProp.TEMP_IO_WRITE_TIME]
+      )
     })
   })
 })
@@ -89,49 +59,53 @@ const ioColumns = computed((): number => {
 })
 
 const hasRows = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.ACTUAL_ROWS_REVISED] || 0 > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.ACTUAL_ROWS_REVISED] || 0 > 1
     })
   })
 })
 
 const hasEstimation = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.PLANNER_ESTIMATE_FACTOR] || 0 > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.PLANNER_ESTIMATE_FACTOR] || 0 > 1
     })
   })
 })
 
 const hasLoops = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.ACTUAL_LOOPS] > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.ACTUAL_LOOPS] > 1
     })
   })
 })
 
 const hasCost = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_COST] > 1
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_COST] > 1
     })
   })
 })
 
 const hasFilter = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.ROWS_REMOVED_BY_FILTER]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return (
+        row.node[NodeProp.ROWS_REMOVED_BY_FILTER] ||
+        row.node[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER] ||
+        row.node[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK]
+      )
     })
   })
 })
 
 const hasHeapFetches = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.HEAP_FETCHES]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.HEAP_FETCHES]
     })
   })
 })
@@ -149,33 +123,33 @@ const sharedBlocksColumns = computed((): number => {
 })
 
 const hasSharedHit = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS]
     })
   })
 })
 
 const hasSharedRead = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS]
     })
   })
 })
 
 const hasSharedDirtied = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS]
     })
   })
 })
 
 const hasSharedWritten = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS]
     })
   })
 })
@@ -185,17 +159,17 @@ const tempBlocksColumns = computed((): number => {
 })
 
 const hasTempRead = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS]
     })
   })
 })
 
 const hasTempWritten = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS]
     })
   })
 })
@@ -213,33 +187,33 @@ const localBlocksColumns = computed((): number => {
 })
 
 const hasLocalHit = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS]
     })
   })
 })
 
 const hasLocalRead = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS]
     })
   })
 })
 
 const hasLocalDirtied = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS]
     })
   })
 })
 
 const hasLocalWritten = computed((): boolean => {
-  return _.some(plans, (plan: Row[]) => {
-    return _.some(plan, (row: Row) => {
-      return row[1][NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS]
+  return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
+    return _.some(plan, (row: FlattenedPlanNode) => {
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS]
     })
   })
 })
@@ -248,6 +222,12 @@ const columnsLeft = computed<string[]>(() => {
   const cols = []
   if (hasTime.value) {
     cols.push("time")
+  }
+  if (hasIORead.value) {
+    cols.push("ioread")
+  }
+  if (hasIOWrite.value) {
+    cols.push("iowrite")
   }
   if (hasRows.value) {
     cols.push("rows")
@@ -313,13 +293,13 @@ const columns = computed(() => {
 <template>
   <div>
     <table class="table table-sm table-hover">
-      <thead class="table-secondary sticky-top" style="z-index: 2">
+      <thead class="sticky-top" style="z-index: 2">
         <tr v-if="hasIO || columnsRight.length > 0" class="table-group">
           <th colspan="2">
             <!-- id & time -->
           </th>
           <th class="text-center" :colspan="ioColumns" v-if="hasIO">io</th>
-          <th :colspan="columnsLeft.length"></th>
+          <th :colspan="columnsLeft.length - ioColumns"></th>
           <th
             class="text-center"
             :colspan="sharedBlocksColumns"
@@ -366,36 +346,22 @@ const columns = computed(() => {
           <th class="text-center" v-if="hasLocalWritten">writ</th>
         </tr>
       </thead>
-      <tbody v-for="(flat, index) in plans" :key="index">
-        <template v-for="(row, index) in flat" :key="index">
-          <tr v-if="row[1][NodeProp.SUBPLAN_NAME]">
-            <td class="bg-light" :colspan="1 + columnsLeft.length"></td>
+      <tbody v-for="(flat, index) in store.flat" :key="index">
+        <template v-for="row in flat" :key="row">
+          <tr v-if="row.node[NodeProp.SUBPLAN_NAME]">
+            <td class="bg-body-tertiary" :colspan="1 + columnsLeft.length"></td>
             <td
-              class="plan pr-2 bg-light"
-              :class="{ 'font-weight-bold': isCTE(row[1]) }"
+              class="plan pr-2 bg-body-tertiary"
+              :class="{ 'font-weight-bold': isCTE(row.node) }"
               :colspan="columns.length + columnsRight.length"
             >
-              <level-divider
-                :isSubplan="!!row[1][NodeProp.SUBPLAN_NAME]"
-                :isLastChild="!!row[2]"
-                :level="row[0]"
-                :branches="row[3]"
-                :index="index"
-              ></level-divider>
+              <LevelDivider :row="row"></LevelDivider>
               <b class="fst-italic text-reset">
-                {{ row[1][NodeProp.SUBPLAN_NAME] }}
+                {{ row.node[NodeProp.SUBPLAN_NAME] }}
               </b>
             </td>
           </tr>
-          <grid-row
-            :node="row[1]"
-            :isSubplan="!!row[1][NodeProp.SUBPLAN_NAME]"
-            :isLastChild="!!row[2]"
-            :level="row[0]"
-            :branches="row[3]"
-            :index="index"
-            :columns="columns"
-          ></grid-row>
+          <GridRow :row="row" :columns="columns"></GridRow>
         </template>
       </tbody>
     </table>

@@ -3,33 +3,23 @@ import _ from "lodash"
 import {
   computed,
   inject,
-  nextTick,
   onBeforeMount,
-  onMounted,
   provide,
   reactive,
   ref,
   watch,
 } from "vue"
-import type { Ref } from "vue"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faInfoCircle } from "@fortawesome/free-solid-svg-icons"
 import { BufferLocation, NodeProp, Metric } from "../enums"
-import { HelpService, scrollChildIntoParentView } from "@/services/help-service"
-import type { IPlan, Node } from "@/interfaces"
-import { HighlightedNodeIdKey, PlanKey, SelectNodeKey } from "@/symbols"
+import {
+  getHelpMessage,
+  scrollChildIntoParentView,
+} from "@/services/help-service"
+import type { Node } from "@/interfaces"
+import { SelectNodeKey } from "@/symbols"
 import DiagramRow from "@/components/DiagramRow.vue"
-
-import { directive as vTippy } from "vue-tippy"
-import tippy, { createSingleton } from "tippy.js"
-import type { CreateSingletonInstance, Instance } from "tippy.js"
-
-const helpService = new HelpService()
-const getHelpMessage = helpService.getHelpMessage
-
-type Row = [number, Node, boolean, number[]]
-
-const plan = inject(PlanKey) as Ref<IPlan>
+import LevelDivider from "@/components/LevelDivider.vue"
+import { Tippy } from "vue-tippy"
+import { store } from "@/store"
 
 const container = ref(null) // The container element
 
@@ -37,12 +27,6 @@ const selectNode = inject(SelectNodeKey)
 if (!selectNode) {
   throw new Error(`Could not resolve ${SelectNodeKey.description}`)
 }
-const highlightedNodeId = inject(HighlightedNodeIdKey)
-
-// The main plan + init plans (all flatten)
-const plans: Row[][] = [[]]
-let tippyInstances: Instance[] = []
-let tippySingleton!: CreateSingletonInstance
 
 const viewOptions = reactive({
   metric: Metric.time,
@@ -54,72 +38,19 @@ onBeforeMount((): void => {
   if (savedOptions) {
     _.assignIn(viewOptions, JSON.parse(savedOptions))
   }
-  flatten(plans[0], 0, plan.value.content.Plan, true, [])
-
-  _.each(plan.value.ctes, (cte) => {
-    const flat: Row[] = []
-    flatten(flat, 0, cte, true, [])
-    plans.push(flat)
-  })
 
   // switch to the first buffers tab if data not available for the currently
   // chosen one
-  const planBufferLocation = _.keys(plan.value.planStats.maxBlocks)
+  const planBufferLocation = _.keys(store.stats.maxBlocks)
   if (_.indexOf(planBufferLocation, viewOptions.buffersMetric) === -1) {
     viewOptions.buffersMetric = _.min(planBufferLocation) as BufferLocation
   }
-})
-
-onMounted((): void => {
-  loadTooltips()
 })
 
 watch(viewOptions, onViewOptionsChanged)
 
 function onViewOptionsChanged() {
   localStorage.setItem("diagramViewOptions", JSON.stringify(viewOptions))
-  nextTick(loadTooltips)
-}
-
-function loadTooltips(): void {
-  if (tippySingleton) {
-    tippySingleton.destroy()
-  }
-  _.each(tippyInstances, (instance) => {
-    instance.destroy()
-  })
-  tippyInstances = tippy(".diagram tr.node")
-  tippySingleton = createSingleton(tippyInstances, {
-    delay: 100,
-    allowHTML: true,
-  })
-}
-
-function flatten(
-  output: Row[],
-  level: number,
-  node: Node,
-  isLast: boolean,
-  branches: number[]
-) {
-  // [level, node, isLastSibbling, branches]
-  output.push([level, node, isLast, _.concat([], branches)])
-  if (!isLast) {
-    branches.push(level)
-  }
-
-  _.each(node.Plans, (subnode) => {
-    flatten(
-      output,
-      level + 1,
-      subnode,
-      subnode === _.last(node.Plans),
-      branches
-    )
-  })
-  if (!isLast) {
-    branches.pop()
-  }
 }
 
 const dataAvailable = computed((): boolean => {
@@ -185,13 +116,24 @@ provide("scrollTo", scrollTo)
           >
             buffers
           </button>
-          <button
-            class="btn btn-outline-secondary"
-            :class="{ active: viewOptions.metric === Metric.io }"
-            v-on:click="viewOptions.metric = Metric.io"
+          <Tippy
+            :content="
+              !store.stats.maxIo
+                ? getHelpMessage('hint track_io_timing')
+                : undefined
+            "
+            :allowHTML="true"
+            class="btn-tooltip-wrapper"
           >
-            IO
-          </button>
+            <button
+              class="btn btn-outline-secondary"
+              :class="{ active: viewOptions.metric === Metric.io }"
+              v-on:click="viewOptions.metric = Metric.io"
+              :disabled="!store.stats.maxIo"
+            >
+              IO
+            </button>
+          </Tippy>
         </div>
       </div>
       <div class="text-center my-1" v-if="viewOptions.metric == Metric.buffers">
@@ -202,7 +144,7 @@ provide("scrollTo", scrollTo)
               active: viewOptions.buffersMetric === BufferLocation.shared,
             }"
             v-on:click="viewOptions.buffersMetric = BufferLocation.shared"
-            :disabled="!plan.planStats.maxBlocks?.[BufferLocation.shared]"
+            :disabled="!store.stats.maxBlocks?.[BufferLocation.shared]"
           >
             shared
           </button>
@@ -212,7 +154,7 @@ provide("scrollTo", scrollTo)
               active: viewOptions.buffersMetric === BufferLocation.temp,
             }"
             v-on:click="viewOptions.buffersMetric = BufferLocation.temp"
-            :disabled="!plan.planStats.maxBlocks?.[BufferLocation.temp]"
+            :disabled="!store.stats.maxBlocks?.[BufferLocation.temp]"
           >
             temp
           </button>
@@ -222,7 +164,7 @@ provide("scrollTo", scrollTo)
               active: viewOptions.buffersMetric === BufferLocation.local,
             }"
             v-on:click="viewOptions.buffersMetric = BufferLocation.local"
-            :disabled="!plan.planStats.maxBlocks?.[BufferLocation.local]"
+            :disabled="!store.stats.maxBlocks?.[BufferLocation.local]"
           >
             local
           </button>
@@ -267,67 +209,61 @@ provide("scrollTo", scrollTo)
               Write
             </li>
           </ul>
-          <FontAwesomeIcon
-            :icon="faInfoCircle"
-            class="cursor-help d-inline-block text-secondary"
-            v-tippy="{
-              content: getHelpMessage('hint track_io_timing'),
-              allowHTML: true,
-            }"
-          ></FontAwesomeIcon>
         </template>
       </div>
     </div>
     <div class="overflow-auto flex-grow-1" ref="container">
-      <table
-        class="m-1"
-        v-if="dataAvailable"
-        :class="{ highlight: !!highlightedNodeId }"
-      >
-        <tbody v-for="(flat, index) in plans" :key="index">
-          <tr v-if="index === 0 && plans.length > 1">
+      <table class="m-1" v-if="dataAvailable">
+        <tbody v-for="(flat, index) in store.flat" :key="index">
+          <tr v-if="index === 0 && store.flat.length > 1">
             <th colspan="3" class="subplan">Main Query Plan</th>
           </tr>
-          <template v-for="(row, index) in flat" :key="index">
-            <tr v-if="row[1][NodeProp.SUBPLAN_NAME]">
+          <template v-for="row in flat" :key="row">
+            <tr v-if="row.node[NodeProp.SUBPLAN_NAME]">
               <td></td>
               <td
-                class="subplan pe-2"
-                :class="{ 'fw-bold': isCTE(row[1]) }"
-                :colspan="isCTE(row[1]) ? 3 : 2"
+                :class="{ 'fw-bold': isCTE(row.node) }"
+                :colspan="isCTE(row.node) ? 3 : 2"
               >
-                <span class="tree-lines">
-                  <template v-for="i in _.range(row[0])">
-                    <template v-if="_.indexOf(row[3], i) != -1">│</template
-                    ><template v-else-if="i !== 0">&emsp;</template> </template
-                  ><template v-if="index !== 0">{{
-                    row[2] ? "└" : "├"
-                  }}</template>
-                </span>
+                <LevelDivider :row="row" dense></LevelDivider>
                 <a
                   class="fst-italic text-reset"
                   href=""
-                  @click.prevent="selectNode(row[1].nodeId, true)"
+                  @click.prevent="selectNode(row.node.nodeId, true)"
                 >
-                  {{ row[1][NodeProp.SUBPLAN_NAME] }}
+                  {{ row.node[NodeProp.SUBPLAN_NAME] }}
                 </a>
               </td>
             </tr>
-            <diagram-row
-              :node="row[1]"
-              :isSubplan="!!row[1][NodeProp.SUBPLAN_NAME]"
-              :isLastChild="!!row[2]"
-              :level="row[0]"
-              :branches="row[3]"
-              :index="index"
-              :viewOptions="viewOptions"
-            ></diagram-row>
+            <DiagramRow :row="row" :viewOptions="viewOptions"></DiagramRow>
           </template>
         </tbody>
       </table>
-      <div class="p-2 text-center text-secondary" v-else>
+      <div class="p-2 text-center text-body-tertiary" v-else>
         <em> No data available </em>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped lang="scss">
+/* Ensure wrapper looks and behaves like a button for layout consistency */
+.btn-group > .btn-tooltip-wrapper {
+  &:not(:last-child) {
+    margin-right: -1px;
+  }
+
+  & > .btn {
+    border-radius: 0;
+  }
+
+  &:first-child > .btn {
+    border-top-left-radius: 0.375rem;
+    border-bottom-left-radius: 0.375rem;
+  }
+  &:last-child > .btn {
+    border-top-right-radius: 0.375rem;
+    border-bottom-right-radius: 0.375rem;
+  }
+}
+</style>

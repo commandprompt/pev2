@@ -18,7 +18,8 @@ const plan1_source = `Nested Loop Left Join  (cost=11.95..28.52 rows=5 width=157
 Planning Time: 1.110 ms
 Execution Time: 0.170 ms
 `
-const plan1_query = `SELECT rel_users_exams.user_username AS rel_users_exams_user_username,
+const plan1_query = `/* A join between two tables */
+SELECT rel_users_exams.user_username AS rel_users_exams_user_username,
          rel_users_exams.exam_id AS rel_users_exams_exam_id,
          rel_users_exams.started_at AS rel_users_exams_started_at,
          rel_users_exams.finished_at AS rel_users_exams_finished_at,
@@ -460,7 +461,8 @@ const plan2_source = `[
 ]
 `
 
-const plan2_query = `SELECT rel_users_exams.user_username AS rel_users_exams_user_username,
+const plan2_query = `/* Joins between four tables */
+SELECT rel_users_exams.user_username AS rel_users_exams_user_username,
          rel_users_exams.exam_id AS rel_users_exams_exam_id,
          rel_users_exams.started_at AS rel_users_exams_started_at,
          rel_users_exams.finished_at AS rel_users_exams_finished_at,
@@ -495,198 +497,9 @@ JOIN answer AS answer_1
 WHERE rel_users_exams.user_username = %(param_1)s
         AND rel_users_exams.exam_id = %(param_2)s
 ORDER BY  question_1.id;
-SELECT rel_users_exams.user_username AS rel_users_exams_user_username,
-           rel_users_exams.exam_id AS rel_users_exams_exam_id,
-           rel_users_exams.started_at AS rel_users_exams_started_at,
-           rel_users_exams.finished_at AS rel_users_exams_finished_at,
-           answer_1.id AS answer_1_id,
-           answer_1.text AS answer_1_text,
-           answer_1.correct AS answer_1_correct,
-           answer_1.fraction AS answer_1_fraction,
-           answer_1.question_id AS answer_1_question_id,
-           question_1.id AS question_1_id,
-           question_1.title AS question_1_title,
-           question_1.text AS question_1_text,
-           question_1.file AS question_1_file,
-           question_1.type AS question_1_type,
-           question_1.source AS question_1_source,
-           question_1.exam_id AS question_1_exam_id,
-           exam_1.id AS exam_1_id,
-           exam_1.title AS exam_1_title,
-           exam_1.date_from AS exam_1_date_from,
-           exam_1.date_to AS exam_1_date_to,
-           exam_1.created AS exam_1_created,
-           exam_1.created_by_ AS exam_1_created_by_,
-           exam_1.duration AS exam_1_duration,
-           exam_1.success_threshold AS exam_1_success_threshold,
-           exam_1.published AS exam_1_published
-FROM rel_users_exams LEFT OUTER
-JOIN exam AS exam_1
-    ON exam_1.id = rel_users_exams.exam_id LEFT OUTER
-JOIN question AS question_1
-    ON exam_1.id = question_1.exam_id LEFT OUTER
-JOIN answer AS answer_1
-    ON question_1.id = answer_1.question_id
-WHERE rel_users_exams.user_username = %(param_1)s
-        AND rel_users_exams.exam_id = %(param_2)s
-ORDER BY  question_1.id;
 `
 
-const plan3_source = `[
-  {
-    "Plan": {
-      "Node Type": "Result",
-      "Startup Cost": 0.00,
-      "Total Cost": 50.13,
-      "Plan Rows": 7,
-      "Plan Width": 405,
-      "Actual Startup Time": 0.139,
-      "Actual Total Time": 0.231,
-      "Actual Rows": 4,
-      "Actual Loops": 1,
-      "Plans": [
-        {
-          "Node Type": "Append",
-          "Parent Relationship": "Outer",
-          "Startup Cost": 0.00,
-          "Total Cost": 50.11,
-          "Plan Rows": 7,
-          "Plan Width": 405,
-          "Actual Startup Time": 0.131,
-          "Actual Total Time": 0.218,
-          "Actual Rows": 4,
-          "Actual Loops": 1,
-          "Plans": [
-            {
-              "Node Type": "Index Scan",
-              "Parent Relationship": "Member",
-              "Scan Direction": "NoMovement",
-              "Index Name": "idx_paris_tags",
-              "Relation Name": "paris",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 8.27,
-              "Plan Rows": 1,
-              "Plan Width": 450,
-              "Actual Startup Time": 0.009,
-              "Actual Total Time": 0.009,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Index Cond": "(tags ? 'tourism'::text)",
-              "Filter": "(ar_num = 8)"
-            },
-            {
-              "Node Type": "Seq Scan",
-              "Parent Relationship": "Member",
-              "Relation Name": "paris_linestrings",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 11.80,
-              "Plan Rows": 1,
-              "Plan Width": 450,
-              "Actual Startup Time": 0.001,
-              "Actual Total Time": 0.001,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Filter": "((tags ? 'tourism'::text) AND (ar_num = 8))"
-            },
-            {
-              "Node Type": "Index Scan",
-              "Parent Relationship": "Member",
-              "Scan Direction": "NoMovement",
-              "Index Name": "idx_paris_points_tags",
-              "Relation Name": "paris_points",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 8.27,
-              "Plan Rows": 1,
-              "Plan Width": 450,
-              "Actual Startup Time": 0.003,
-              "Actual Total Time": 0.003,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Index Cond": "(tags ? 'tourism'::text)",
-              "Filter": "(ar_num = 8)"
-            },
-            {
-              "Node Type": "Index Scan",
-              "Parent Relationship": "Member",
-              "Scan Direction": "NoMovement",
-              "Index Name": "idx_paris_polygons_tags",
-              "Relation Name": "paris_polygons",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 8.27,
-              "Plan Rows": 1,
-              "Plan Width": 450,
-              "Actual Startup Time": 0.002,
-              "Actual Total Time": 0.002,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Index Cond": "(tags ? 'tourism'::text)",
-              "Filter": "(ar_num = 8)"
-            },
-            {
-              "Node Type": "Seq Scan",
-              "Parent Relationship": "Member",
-              "Relation Name": "paris_linestrings_ar_08",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 7.27,
-              "Plan Rows": 1,
-              "Plan Width": 513,
-              "Actual Startup Time": 0.103,
-              "Actual Total Time": 0.103,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Filter": "((tags ? 'tourism'::text) AND (ar_num = 8))"
-            },
-            {
-              "Node Type": "Seq Scan",
-              "Parent Relationship": "Member",
-              "Relation Name": "paris_points_ar_08",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 5.16,
-              "Plan Rows": 1,
-              "Plan Width": 72,
-              "Actual Startup Time": 0.009,
-              "Actual Total Time": 0.085,
-              "Actual Rows": 4,
-              "Actual Loops": 1,
-              "Filter": "((tags ? 'tourism'::text) AND (ar_num = 8))"
-            },
-            {
-              "Node Type": "Seq Scan",
-              "Parent Relationship": "Member",
-              "Relation Name": "paris_polygons_ar_08",
-              "Alias": "paris",
-              "Startup Cost": 0.00,
-              "Total Cost": 1.08,
-              "Plan Rows": 1,
-              "Plan Width": 450,
-              "Actual Startup Time": 0.007,
-              "Actual Total Time": 0.007,
-              "Actual Rows": 0,
-              "Actual Loops": 1,
-              "Filter": "((tags ? 'tourism'::text) AND (ar_num = 8))"
-            }
-          ]
-        }
-      ]
-    },
-    "Triggers": [
-    ],
-    "Total Runtime": 1.238
-  }
-]
-`
-
-const plan3_query = `SELECT feature_name, tags->'tourism' As tourism_type FROM ch03.paris
-    WHERE ar_num = 8 AND tags?'tourism';
-`
-
-const plan4_source = `[
+const plan_many_ctes = `[
   {
     "Plan": {
       "Node Type": "Sort",
@@ -2709,7 +2522,8 @@ const plan5_source = `
 ]
 `
 
-const plan5_query = `SELECT c.state,
+const plan5_query = `/* An aggregate with four joins */
+SELECT c.state,
   cat.categoryname,
   sum(o.netamount),
   sum(o.totalamount)
@@ -5720,6 +5534,145 @@ const plan8_source = String.raw`{
 }
 `
 
+const plan_asmany_source =` Merge on public.tb  (cost=262602.88..306621.45 rows=0 width=0) (actual time=7798.118..7798.122 rows=0 loops=1)
+   Tuples: inserted=9995 updated=9679 deleted=326
+   Buffers: shared hit=7731564 read=22226 dirtied=27295 written=38115, temp read=9593 written=27592
+   I/O Timings: shared read=22.960 write=186.426, temp read=17.017 write=119.861
+   WAL: records=5049414 fpi=5192 bytes=416135793
+   CTE tbl
+     ->  Insert on pg_temp.tblog  (cost=8704.82..8705.65 rows=0 width=0) (actual time=509.761..509.761 rows=0 loops=1)
+           Buffers: shared hit=3 read=5448 written=5276, local hit=494411 dirtied=2644 written=4269, temp read=1559 written=1568
+           I/O Timings: shared read=10.578 write=13.760, local write=54.430, temp read=2.942 write=6.888
+           ->  Sort  (cost=8704.82..8705.65 rows=333 width=12) (actual time=286.491..347.529 rows=489127 loops=1)
+                 Output: tb_1.i, tb_1.x
+                 Sort Key: tb_1.x
+                 Sort Method: external merge  Disk: 12472kB
+                 Buffers: shared hit=3 read=5448 written=5276, temp read=1559 written=1568
+                 I/O Timings: shared read=10.578 write=13.760, temp read=2.942 write=6.888
+                 ->  Bitmap Heap Scan on public.tb tb_1  (cost=180.48..8690.86 rows=333 width=12) (actual time=30.582..122.685 rows=489127 loops=1)
+                       Output: tb_1.i, tb_1.x
+                       Recheck Cond: ((tb_1.i >= 4000000) AND (tb_1.i <= 5000000))
+                       Filter: ((mod(tb_1.i, 99) > 0) AND (mod(tb_1.i, 98) > 0) AND (mod(tb_1.i, 98) > 0) AND ((tb_1.i + 1) > 0))
+                       Rows Removed by Filter: 10068
+                       Heap Blocks: exact=3181
+                       Buffers: shared hit=3 read=5448 written=5276
+                       I/O Timings: shared read=10.578 write=13.760
+                       ->  Bitmap Index Scan on tb_pkey  (cost=0.00..180.40 rows=8997 width=0) (actual time=30.251..30.251 rows=499195 loops=1)
+                             Index Cond: ((tb_1.i >= 4000000) AND (tb_1.i <= 5000000))
+                             Buffers: shared hit=2 read=2268 written=2181
+                             I/O Timings: shared read=4.315 write=5.384
+   CTE tabb
+     ->  Update on public.ta  (cost=96.13..93079.47 rows=1667044 width=18) (actual time=11.270..6418.935 rows=2499947 loops=1)
+           Output: ta_1.i, ta_1.x, ta_1.filler
+           Update on public.ta1 ta_1
+           Update on public.ta2 ta_2
+           Buffers: shared hit=7542762 read=22126 dirtied=26988 written=37604
+           I/O Timings: shared read=22.722 write=184.053
+           WAL: records=4999894 fpi=5162 bytes=412139886
+           InitPlan 3
+             ->  Result  (cost=96.12..96.13 rows=1 width=4) (actual time=0.052..0.053 rows=1 loops=1)
+                   Output: ((InitPlan 2).col1 / 2)
+                   Buffers: shared hit=2 read=2
+                   I/O Timings: shared read=0.007
+                   InitPlan 2
+                     ->  Limit  (cost=0.43..96.12 rows=1 width=4) (actual time=0.048..0.048 rows=1 loops=1)
+                           Output: tb_2.i
+                           Buffers: shared hit=2 read=2
+                           I/O Timings: shared read=0.007
+                           ->  Index Only Scan Backward using tb_pkey on public.tb tb_2  (cost=0.43..95690.29 rows=1000 width=4) (actual time=0.045..0.045 rows=1 loops=1)
+                                 Output: tb_2.i
+                                 Filter: (((tb_2.i + 1) > 0) AND ((tb_2.i + 2) > 0) AND (mod(tb_2.i, 99) = 0))
+                                 Rows Removed by Filter: 38
+                                 Heap Fetches: 39
+                                 Buffers: shared hit=2 read=2
+                                 I/O Timings: shared read=0.007
+           ->  Append  (cost=0.00..92983.35 rows=1667044 width=18) (actual time=0.078..650.328 rows=2499947 loops=1)
+                 Buffers: shared hit=2 read=22126 written=8891
+                 I/O Timings: shared read=22.722 write=25.883
+                 ->  Seq Scan on public.ta1 ta_1  (cost=0.00..84624.00 rows=1666667 width=18) (actual time=0.016..486.444 rows=2499947 loops=1)
+                       Output: '2'::double precision, ta_1.tableoid, ta_1.ctid
+                       Filter: (ta_1.i < (InitPlan 3).col1)
+                       Rows Removed by Filter: 2500053
+                       Buffers: shared read=22124 written=8891
+                       I/O Timings: shared read=22.715 write=25.883
+                 ->  Seq Scan on public.ta2 ta_2  (cost=0.00..24.12 rows=377 width=18) (never executed)
+                       Output: '2'::double precision, ta_2.tableoid, ta_2.ctid
+                       Filter: (ta_2.i < (InitPlan 3).col1)
+   CTE tab
+     ->  Limit  (cost=160767.33..160817.33 rows=20000 width=44) (actual time=7700.673..7704.219 rows=20000 loops=1)
+           Output: tabb.i, tabb.x, tabb.filler
+           Buffers: shared hit=7542762 read=22126 dirtied=26988 written=37604, temp read=9593 written=27592
+           I/O Timings: shared read=22.722 write=184.053, temp read=17.017 write=119.861
+           WAL: records=4999894 fpi=5162 bytes=412139886
+           ->  Sort  (cost=160767.33..164934.94 rows=1667044 width=44) (actual time=7563.572..7565.984 rows=20000 loops=1)
+                 Output: tabb.i, tabb.x, tabb.filler
+                 Sort Key: tabb.x
+                 Sort Method: external merge  Disk: 73440kB
+                 Buffers: shared hit=7542762 read=22126 dirtied=26988 written=37604, temp read=9593 written=27592
+                 I/O Timings: shared read=22.722 write=184.053, temp read=17.017 write=119.861
+                 WAL: records=4999894 fpi=5162 bytes=412139886
+                 ->  CTE Scan on tabb  (cost=0.00..33340.88 rows=1667044 width=44) (actual time=11.274..7104.296 rows=2499947 loops=1)
+                       Output: tabb.i, tabb.x, tabb.filler
+                       Buffers: shared hit=7542762 read=22126 dirtied=26988 written=37604, temp written=9155
+                       I/O Timings: shared read=22.722 write=184.053, temp write=58.774
+                       WAL: records=4999894 fpi=5162 bytes=412139886
+   ->  Nested Loop Left Join  (cost=0.43..44019.00 rows=20000 width=102) (actual time=7700.749..7733.331 rows=20000 loops=1)
+         Output: tb.ctid, tab.i, tab.filler, tab.*
+         Inner Unique: true
+         Buffers: shared hit=7612704 read=22189 dirtied=26988 written=37663, temp read=9593 written=27592
+         I/O Timings: shared read=22.871 write=184.243, temp read=17.017 write=119.861
+         WAL: records=4999894 fpi=5162 bytes=412139886
+         ->  CTE Scan on tab  (cost=0.00..400.00 rows=20000 width=96) (actual time=7700.708..7709.042 rows=20000 loops=1)
+               Output: tab.i, tab.filler, tab.*
+               Buffers: shared hit=7542762 read=22126 dirtied=26988 written=37604, temp read=9593 written=27592
+               I/O Timings: shared read=22.722 write=184.053, temp read=17.017 write=119.861
+               WAL: records=4999894 fpi=5162 bytes=412139886
+         ->  Index Scan using tb_pkey on public.tb  (cost=0.43..2.18 rows=1 width=10) (actual time=0.001..0.001 rows=1 loops=20000)
+               Output: tb.ctid, tb.i
+               Index Cond: (tb.i = tab.i)
+               Buffers: shared hit=69942 read=63 written=59
+               I/O Timings: shared read=0.149 write=0.190
+ Settings: work_mem = '3MB', random_page_cost = '1.5', parallel_tuple_cost = '0', jit_above_cost = '0', jit_inline_above_cost = '0', jit_optimize_above_cost = '0'
+ Planning:
+   Buffers: shared hit=26 read=1
+   I/O Timings: shared read=0.003
+   Memory: used=165kB  allocated=264kB
+ Planning Time: 0.289 ms
+ Trigger RI_ConstraintTrigger_a_18153 for constraint tc1_fkey on tb: time=4399.335 calls=326
+ Trigger RI_ConstraintTrigger_a_18161 for constraint tc2_fkey on tc1: time=6000.010 calls=326
+ JIT:
+   Functions: 31
+   Options: Inlining true, Optimization true, Expressions true, Deforming true
+   Timing: Generation 1.340 ms (Deform 0.303 ms), Inlining 9.145 ms, Optimization 82.044 ms, Emission 57.043 ms, Total 149.572 ms
+ Serialization: time=0.000 ms  output=0kB  format=text
+ Execution Time: 18733.542 ms
+(112 lignes)
+`
+
+// Query with as many features as possible
+// Complete script: src/services/__tests__/20-as_many_features_as_possible.sql
+const plan_asmany_query = `EXPLAIN (ANALYZE,BUFFERS,VERBOSE,SETTINGS,WAL,SERIALIZE,MEMORY,FORMAT TEXT)
+WITH
+tBl  AS ( INSERT INTO tBlog SELECT i,x FROM tB
+          WHERE i BETWEEN 4000000 AND 5000000
+          AND mod(i,99)>0 AND mod(i,98)>0 AND mod(i,98)>0 and i+1>0 /* force bitmap index */
+          ORDER BY x),
+tAbb AS ( UPDATE tA SET x=2 WHERE i < (
+            SELECT max(i)/2 FROM tB  WHERE mod(i,99)=0  AND i+1>0 AND i+2>0  /* for bad stats */
+            )
+          RETURNING * ),
+tAb  AS MATERIALIZED ( SELECT * FROM tAbb ORDER BY x LIMIT 20000)
+MERGE INTO tB
+USING tAb ON (tB.i=tAb.i)
+WHEN NOT MATCHED THEN
+   INSERT VALUES (tAb.i, 0.0, '000')
+WHEN MATCHED AND tB.x > 0.97 THEN
+   DELETE  /*  will raise the ON DELETE trigger (very costly) */
+WHEN MATCHED THEN
+   UPDATE SET filler=tAb.filler
+;
+`
+
 const plan_parallel_source = `[
   {
     "Plan": {
@@ -5939,80 +5892,34 @@ const plan_trigger_source = `                                                   
 
 const plan_trigger_query = `DELETE FROM emailmessages where emailmessageid in ( select emailmessageid from emailmessages limit 5000 );`
 
-const plan_trigger_2_source = `[
-  {
-    "Plan": {
-      "Node Type": "ModifyTable",
-      "Operation": "Insert",
-      "Parallel Aware": false,
-      "Relation Name": "emp",
-      "Schema": "brut",
-      "Alias": "emp",
-      "Startup Cost": 0.0,
-      "Total Cost": 0.01,
-      "Plan Rows": 1,
-      "Plan Width": 44,
-      "Actual Startup Time": 0.401,
-      "Actual Total Time": 0.401,
-      "Actual Rows": 0,
-      "Actual Loops": 1,
-      "Shared Hit Blocks": 1,
-      "Shared Read Blocks": 0,
-      "Shared Dirtied Blocks": 0,
-      "Shared Written Blocks": 0,
-      "Local Hit Blocks": 0,
-      "Local Read Blocks": 0,
-      "Local Dirtied Blocks": 0,
-      "Local Written Blocks": 0,
-      "Temp Read Blocks": 0,
-      "Temp Written Blocks": 0,
-      "Plans": [
-        {
-          "Node Type": "Result",
-          "Parent Relationship": "Member",
-          "Parallel Aware": false,
-          "Startup Cost": 0.0,
-          "Total Cost": 0.01,
-          "Plan Rows": 1,
-          "Plan Width": 44,
-          "Actual Startup Time": 0.004,
-          "Actual Total Time": 0.004,
-          "Actual Rows": 1,
-          "Actual Loops": 1,
-          "Output": ["10000", "now()", "'pouet'::text"],
-          "Shared Hit Blocks": 0,
-          "Shared Read Blocks": 0,
-          "Shared Dirtied Blocks": 0,
-          "Shared Written Blocks": 0,
-          "Local Hit Blocks": 0,
-          "Local Read Blocks": 0,
-          "Local Dirtied Blocks": 0,
-          "Local Written Blocks": 0,
-          "Temp Read Blocks": 0,
-          "Temp Written Blocks": 0
-        }
-      ]
-    },
-    "Planning Time": 0.049,
-    "Triggers": [
-      {
-        "Trigger Name": "emp_stamp",
-        "Relation": "emp",
-        "Time": 1.565,
-        "Calls": 1
-      },
-      {
-        "Trigger Name": "emp_stamp2",
-        "Relation": "emp",
-        "Time": 0.106,
-        "Calls": 1
-      }
-    ],
-    "Execution Time": 2.121
-  }
-]`
+const plan_4partitions_source = `
+ Append  (cost=0.43..170502.33 rows=4018259 width=97) (actual time=0.007..464.318 rows=4000001 loops=1)
+   Buffers: shared hit=39 read=69641
+   I/O Timings: shared read=66.219
+   ->  Index Scan using pgbench_accounts_2_pkey on pgbench_accounts_2 pgbench_accounts_1  (cost=0.43..8.45 rows=1 width=97) (actual time=0.006..0.007 rows=1 loops=1)
+         Index Cond: ((aid >= 5000000) AND (aid <= 9000000))
+         Buffers: shared hit=4
+   ->  Seq Scan on pgbench_accounts_3 pgbench_accounts_2  (cost=0.00..78484.00 rows=2500000 width=97) (actual time=0.032..163.701 rows=2500000 loops=1)
+         Filter: ((aid >= 5000000) AND (aid <= 9000000))
+         Buffers: shared hit=32 read=40952
+         I/O Timings: shared read=32.345
+   ->  Index Scan using pgbench_accounts_4_pkey on pgbench_accounts_4 pgbench_accounts_3  (cost=0.43..71918.59 rows=1518258 width=97) (actual time=0.020..148.504 rows=1500000 loops=1)
+         Index Cond: ((aid >= 5000000) AND (aid <= 9000000))
+         Buffers: shared hit=3 read=28689
+         I/O Timings: shared read=33.874
+ Settings: jit = 'off'
+ Planning:
+   Buffers: shared hit=20
+ Planning Time: 0.271 ms
+ Execution Time: 548.488 ms
+`
 
-const plan_trigger_2_query = `INSERT INTO brut.emp VALUES (10000, NOW(), 'pouet');`
+const plan_4partitions_query = `
+/* Query on a pgbench database with 4 partitions,
+   only 3 are used */
+EXPLAIN (ANALYZE,BUFFERS,SETTINGS)
+SELECT * from pgbench_accounts where aid  BETWEEN  5000000 AND 9000000 ;
+`
 
 interface Sample extends Array<string> {
   0: string
@@ -6021,20 +5928,20 @@ interface Sample extends Array<string> {
 }
 
 const samples = <Sample[]>[
-  ["Example 1 TEXT", plan1_source, plan1_query],
-  ["Example 1 JSON", plan1_source_json, plan1_query],
-  ["Example 2", plan2_source, plan2_query],
-  ["Example 3", plan3_source, plan3_query],
-  ["Example 5", plan5_source, plan5_query],
+  ["Simple join (TEXT format)", plan1_source, plan1_query],
+  ["Simple join (JSON format)", plan1_source_json, plan1_query],
+  ["Three joins, missing an index", plan2_source, plan2_query],
+  ["Aggregate with four joins", plan5_source, plan5_query],
   ["With subplan", plan6_source, ""],
   ["With Buffers", plan7_source, plan7_query],
-  ["With CTE", plan9_source, plan9_query],
-  ["With CTEs", plan4_source, ""],
+  ["A single CTE", plan9_source, plan9_query],
+  ["Many CTEs", plan_many_ctes, ""],
   ["Very large plan", plan8_source, ""],
-  ["With trigger", plan_trigger_2_source, plan_trigger_2_query],
-  ["With trigger (plain text)", plan_trigger_source, plan_trigger_query],
+  ["DELETE with triggers", plan_trigger_source, plan_trigger_query],
+  ["With many options", plan_asmany_source, plan_asmany_query],
   ["Parallel (verbose)", plan_parallel_source, ""],
   ["Parallel (4 workers)", plan_parallel_2_source, plan_parallel_2_query],
+  ["Partitions", plan_4partitions_source, plan_4partitions_query],
 ]
 
 export default samples
