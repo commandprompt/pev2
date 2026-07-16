@@ -23,38 +23,32 @@
                             {
                                 "Actual Loops": 0,
                                 "Actual Rows": 0,
-                                "Actual Total Time": 0,
                                 "Filter": "(a.rn = 1)",
                                 "Node Type": "Subquery Scan",
                                 "Plans": [
                                     {
                                         "Actual Loops": 0,
                                         "Actual Rows": 0,
-                                        "Actual Total Time": 0,
                                         "Node Type": "Sort",
                                         "Plans": [
                                             {
                                                 "Actual Loops": 0,
                                                 "Actual Rows": 0,
-                                                "Actual Total Time": 0,
                                                 "Node Type": "WindowAgg",
                                                 "Plans": [
                                                     {
                                                         "Actual Loops": 0,
                                                         "Actual Rows": 0,
-                                                        "Actual Total Time": 0,
                                                         "Node Type": "Sort",
                                                         "Plans": [
                                                             {
                                                                 "Actual Loops": 0,
                                                                 "Actual Rows": 0,
-                                                                "Actual Total Time": 0,
                                                                 "Node Type": "Redistribute Motion",
                                                                 "Plans": [
                                                                     {
                                                                         "Actual Loops": 0,
                                                                         "Actual Rows": 0,
-                                                                        "Actual Total Time": 0,
                                                                         "Node Type": "Nested Loop",
                                                                         "Plans": [
                                                                             {
@@ -73,13 +67,11 @@
                                                                             {
                                                                                 "Actual Loops": 0,
                                                                                 "Actual Rows": 0,
-                                                                                "Actual Total Time": 0,
                                                                                 "Node Type": "Append",
                                                                                 "Plans": [
                                                                                     {
                                                                                         "Actual Loops": 0,
                                                                                         "Actual Rows": 0,
-                                                                                        "Actual Total Time": 0,
                                                                                         "Filter": "((test_time >= '2024-10-01 00:00:00'::timestamp without time zone) AND ((wc)::text = '50'::text))",
                                                                                         "Node Type": "Bitmap Heap Scan",
                                                                                         "Plans": [
@@ -108,14 +100,12 @@
                                                                                     {
                                                                                         "Actual Loops": 0,
                                                                                         "Actual Rows": 0,
-                                                                                        "Actual Total Time": 0,
                                                                                         "Filter": "((test_time >= '2024-10-01 00:00:00'::timestamp without time zone) AND ((wc)::text = '50'::text))",
                                                                                         "Node Type": "Bitmap Heap Scan",
                                                                                         "Plans": [
                                                                                             {
                                                                                                 "Actual Loops": 0,
                                                                                                 "Actual Rows": 0,
-                                                                                                "Actual Total Time": 0,
                                                                                                 "Index Name": "newitcnd_log_info_1_prt_other_transaction_id_idx",
                                                                                                 "Node Type": "Bitmap Index Scan",
                                                                                                 "Plan Rows": 14,

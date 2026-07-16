@@ -158,29 +158,28 @@ const shouldShowSerializationBuffers = computed((): boolean => {
     </div>
     <div class="d-inline-block border-start px-2">
       Memory used:
-      <template v-if="!plan.planStats.memoryUsed">
-        <span class="text-secondary"> N/A </span>
+
+      <template v-if="!store.stats.memoryUsed">
+        <span class="text-body-tertiary">N/A</span>
       </template>
+
       <template v-else>
         <span class="stat-value">
-          <span v-html="formatMemoryUsage(plan.planStats.memoryUsed)"></span>
+          {{ formatKilobytes(store.stats.memoryUsed) }}
         </span>
       </template>
     </div>
+
     <div class="d-inline-block border-start px-2">
       Optimizer:
-      <template v-if="!plan.planStats.optimizer">
-        <span class="text-secondary">
-          <FontAwesomeIcon
-            :icon="faInfoCircle"
-            class="cursor-help"
-            v-tippy="getHelpMessage('missing planning time')"
-          ></FontAwesomeIcon>
-        </span>
+
+      <template v-if="!store.stats.optimizer">
+        <span class="text-body-tertiary">N/A</span>
       </template>
+
       <template v-else>
         <span class="stat-value">
-          <span v-html="plan.planStats.optimizer"></span>
+          {{ store.stats.optimizer }}
         </span>
       </template>
     </div>

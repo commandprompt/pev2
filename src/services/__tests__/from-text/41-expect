@@ -23,26 +23,22 @@
                             {
                                 "Actual Loops": 0,
                                 "Actual Rows": 0,
-                                "Actual Total Time": 0,
                                 "Filter": "((row_number() OVER (?)) = 1)",
                                 "Node Type": "Result",
                                 "Plans": [
                                     {
                                         "Actual Loops": 0,
                                         "Actual Rows": 0,
-                                        "Actual Total Time": 0,
                                         "Node Type": "WindowAgg",
                                         "Plans": [
                                             {
                                                 "Actual Loops": 0,
                                                 "Actual Rows": 0,
-                                                "Actual Total Time": 0,
                                                 "Node Type": "Sort",
                                                 "Plans": [
                                                     {
                                                         "Actual Loops": 0,
                                                         "Actual Rows": 0,
-                                                        "Actual Total Time": 0,
                                                         "Node Type": "Nested Loop",
                                                         "Plans": [
                                                             {
@@ -60,13 +56,11 @@
                                                             {
                                                                 "Actual Loops": 0,
                                                                 "Actual Rows": 0,
-                                                                "Actual Total Time": 0,
                                                                 "Node Type": "Sequence",
                                                                 "Plans": [
                                                                     {
                                                                         "Actual Loops": 0,
                                                                         "Actual Rows": 0,
-                                                                        "Actual Total Time": 0,
                                                                         "Node Type": "Partition Selector for newitcnd_log_info",
                                                                         "Plan Rows": 5,
                                                                         "Total Cost": 100,
@@ -78,14 +72,12 @@
                                                                     {
                                                                         "Actual Loops": 0,
                                                                         "Actual Rows": 0,
-                                                                        "Actual Total Time": 0,
                                                                         "Filter": "(((transaction_id)::text = (tmp_transactionid.transaction_id)::text) AND (test_time >= '2024-10-01 00:00:00'::timestamp without time zone) AND ((wc)::text = '50'::text))",
                                                                         "Node Type": "Dynamic Bitmap Heap Scan on newitcnd_log_info",
                                                                         "Plans": [
                                                                             {
                                                                                 "Actual Loops": 0,
                                                                                 "Actual Rows": 0,
-                                                                                "Actual Total Time": 0,
                                                                                 "Node Type": "BitmapAnd",
                                                                                 "Plans": [
                                                                                     {

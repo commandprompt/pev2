@@ -48,8 +48,6 @@
 
                                 "Actual Rows": 0,
 
-                                "Actual Total Time": 0,
-
                                 "Filter": "((row_number() OVER (?)) = 1)",
 
                                 "Node Type": "Result",
@@ -62,7 +60,6 @@
 
                                         "Actual Rows": 0,
 
-                                        "Actual Total Time": 0,
 
                                         "Node Type": "WindowAgg",
 
@@ -74,7 +71,6 @@
 
                                                 "Actual Rows": 0,
 
-                                                "Actual Total Time": 0,
 
                                                 "Node Type": "Sort",
 
@@ -86,7 +82,6 @@
 
                                                         "Actual Rows": 0,
 
-                                                        "Actual Total Time": 0,
 
                                                         "Node Type": "Hash Join",
 
@@ -111,8 +106,6 @@
                                                                         "Actual Loops": 0,
 
                                                                         "Actual Rows": 0,
-
-                                                                        "Actual Total Time": 0,
 
                                                                         "Node Type": "Partition Selector for newitcnd_log_info",
 
